@@ -31,9 +31,32 @@ The backend will require sensitive proxy credentials, OAuth2 refresh token pools
 
 ---
 
+## Phase 2: Core Download Pipeline & Extraction Logic
+
+### Problem 2.1: Download Concurrency & Throttling Evasion
+YouTube throttles single HTTP connections. The pipeline analysis requires forcing fragment concurrency to bypass these limits.
+*   **[SELECTED] Solution A (External `aria2c`):** Integrate `aria2c` as the external downloader for `yt-dlp`, establishing 16 concurrent TCP byte-range connections (`-x 16 -k 1M`). This is highly robust but requires installing `aria2c` in our Docker container.
+*   ~~Solution B (Native `yt-dlp` Concurrency):~~ Utilize `yt-dlp`'s built-in `--concurrent-fragments` flag. It requires no external dependencies but can sometimes fail to maintain persistent connections compared to `aria2c`.
+
+### Problem 2.2: Universal Media Protocol (UMP) & SABR Handling
+YouTube enforces the SABR protocol, which drops resolution to 360p for non-compliant clients and obfuscates stream data inside UMP blobs.
+*   **[SELECTED] Solution A (Custom Protocol Bridges):** As mandated by the pipeline analysis, we inject custom Python bridges (`SabrStreamingAdapter` and `SabrUmpProcessor`) into `yt-dlp`'s core extraction hooks to programmatically unpack UMP wrappers in-memory and bypass fake server-side buffering.
+*   ~~Solution B (Wait for Upstream):~~ Rely entirely on upstream updates from the `yt-dlp` community to eventually handle SABR/UMP natively. (Note: This is risky if zero-day patching is required).
+
+### Problem 2.3: FFmpeg Multiplexing RAM Exhaustion During Serial Downloads
+Because the pipeline downloads videos *serially*, we avoid the problem of concurrent FFmpeg instances. However, downloading large 4K video files alongside high-quality audio files into the 4GB RAM disk and then running FFmpeg to merge them still causes massive memory spikes.
+*   **[SELECTED] Solution A (Strict Synchronous Blocking):** Ensure the Python worker completely blocks until `yt-dlp` finishes the download AND FFmpeg finishes multiplexing and the final file is uploaded/deleted before moving to the next video in the serial queue. This strictly caps RAM usage to exactly one video lifecycle and guarantees we never exceed 4GB.
+*   ~~Solution B (Streamed Multiplexing / Piped Output):~~ Force `yt-dlp` to pipe the downloaded streams directly into FFmpeg (`ffmpeg -i pipe:0 ...`) so that the raw video and audio `.part` files are never written to the RAM disk simultaneously. This drastically reduces the required RAM footprint but is much more complex to implement and debug.
+
+### Problem 2.4: Lingering Fragments Causing RAM Disk Saturation
+Failed downloads leave behind `.part` or `.ytdl` fragments. Over time, these will exhaust our 4GB RAM disk.
+*   **[SELECTED] Solution A (Python Garbage Collection Wrapper):** Create an explicit Python cleanup function that aggressively purges the temporary workspace of any lingering fragments *before* initiating any new download, combined with `yt-dlp`'s `--no-continue` flag.
+*   ~~Solution B (`yt-dlp` Exec Hook):~~ Pass `--no-continue` and use `yt-dlp`'s native `--exec before_dl:"rm -rf /tmp/*.part"` bash hooks to handle cleanup.
+
+---
+
 ## Future Phases (To Be Detailed)
 
-*   **Phase 2: Core Download Pipeline & Extraction Logic** (Implementing `yt-dlp` integration, concurrency, and UMP extraction).
 *   **Phase 3: BotGuard & Anti-Bot Architecture** (Microservices for PoToken generation, Visitor ID binding, and Signature Decryption).
 *   **Phase 4: Upload Automation & Quota Management** (OAuth2 token rotation, quota load-balancing, and privacy settings).
 *   **Phase 5: Frontend UI & API Integration** (Building the modern UI, decoupled API boundaries, and real-time link delivery).

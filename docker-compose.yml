@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+    container_name: video-pipeline-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - WORKSPACE_DIR=/dev/shm
+    # Crucial setting for local testing: Docker defaults to 64MB for /dev/shm.
+    # 4GB ensures enough space for concurrent video processing.
+    shm_size: '4gb'
+    volumes:
+      - ./backend:/app
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload

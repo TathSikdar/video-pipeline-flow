@@ -1,0 +1,8 @@
+yt-dlp
+websockets
+fastapi
+uvicorn[standard]
+black
+flake8
+pre-commit
+python-dotenv
