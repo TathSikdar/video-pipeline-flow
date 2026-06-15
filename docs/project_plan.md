@@ -55,9 +55,73 @@ Failed downloads leave behind `.part` or `.ytdl` fragments. Over time, these wil
 
 ---
 
-## Future Phases (To Be Detailed)
+## Phase 3: BotGuard & Anti-Bot Architecture
 
-*   **Phase 3: BotGuard & Anti-Bot Architecture** (Microservices for PoToken generation, Visitor ID binding, and Signature Decryption).
-*   **Phase 4: Upload Automation & Quota Management** (OAuth2 token rotation, quota load-balancing, and privacy settings).
-*   **Phase 5: Frontend UI & API Integration** (Building the modern UI, decoupled API boundaries, and real-time link delivery).
-*   **Phase 6: Deployment & IP Rotation Topology** (Configuring Render Docker environments, SLAAC IPv6 rotation, and residential proxy routing).
+### Problem 3.1: Cryptographic Attestation (BotGuard PoTokens)
+YouTube drops streams to 360p or blocks them (HTTP 403) unless a mathematically accurate Proof of Origin (PoToken) is submitted. Generating this requires executing the BotGuard VM script cleanly.
+*   **[SELECTED] Solution A (Isolated Deno/Node Microservice):** As recommended by the analysis doc, build a completely isolated microservice (e.g., `botguard-provider`) in a sterile Deno/Node.js Docker container to handle the `api/jnn/v1/GenerateIT` challenges without blocking the Python download threads.
+*   ~~Solution B (Python embedded JS engine):~~ Embed `py_mini_racer` or `QuickJS` directly into the Python worker to execute the token generation. (Highly risky due to anti-logger traps and thread-blocking).
+
+### Problem 3.2: Signature Cipher Decryption
+Video streams are encrypted with a dynamic cipher located in `base.js`.
+*   **[SELECTED] Solution A (Microservice Routing):** Route all signature decryption math to the external Node.js/Deno microservice created in Problem 3.1.
+*   ~~Solution B (Python Regex + QuickJS Fallback):~~ Attempt to extract the cipher locally in Python using hardcoded regex. If it fails, spin up a lightweight QuickJS instance inside Python to execute the math.
+
+### Problem 3.3: Client Identity & Browser Fingerprinting Evasion
+Generating valid visitor cookies (`VISITOR_INFO1_LIVE`) requires passing hidden `<canvas>` cryptographic pixel hashing and WebGL string checks.
+*   **[SELECTED] Solution A (C++ Patched Browser Engine):** Utilize a stealth browser engine patched at the C++ level (e.g., Camoufox) to fetch initial session data, perfectly emulating consumer font tables and screen geometry without relying on detectable JavaScript overrides.
+*   ~~Solution B (Standard Playwright Overrides):~~ Use standard Playwright with JavaScript prototype overrides (`Object.defineProperty`) to mask headless variables. (Faster to setup, but very easily caught by advanced BotGuard checks).
+
+### Problem 3.4: Datacenter Authentication
+The analysis states we must *never* transport residential session cookies to the datacenter. Instead, we must use the OAuth 2.0 Device Flow via the `TVHTML5` client.
+*   **[SELECTED] Solution A (Automated Device Flow Script):** Implement a Python script that spoofs the `TVHTML5` client, polls `google.com/device`, and prompts the user to enter the link/code. It then automatically saves the OAuth refresh token to the `.env` file.
+*   ~~Solution B (Manual Setup):~~ Provide instructions for the user to manually execute the `TVHTML5` device flow on their local machine and manually copy-paste the tokens into the environment.
+
+---
+
+## Phase 4: Upload Automation & Quota Management
+
+### Problem 4.1: Google API Quota Exhaustion & Credential Pooling
+The YouTube Data API strictly limits uploads to 10,000 quota units per GCP project daily. We need to upload videos infinitely.
+*   **[SELECTED] Solution B (Redis-backed State Tracking) + Solution A (Fallback):** Implement an external Redis database to track token health, daily quota usage, and rotation states across multiple worker nodes. If the Redis server is unavailable, the backend gracefully falls back to an In-Memory Round Robin Pool loaded directly from the `.env` file.
+
+### Problem 4.2: Resumable Upload Mechanics for Large Files
+Uploading multi-gigabyte 4K videos directly from the Render Docker container can easily trigger HTTP connection timeouts or memory drops.
+*   **[SELECTED] Solution B (Standard One-Shot POST w/ 1080p Cap):** Attempt to push the entire video payload in a single massive HTTP POST request. To explicitly guarantee we don't trigger timeouts or massive memory drops, we enforce a strict `1080p` maximum resolution cap directly inside `yt-dlp`. This keeps the file sizes significantly smaller while retaining high quality.
+*   ~~Solution A (Resumable Upload Protocol):~~ Implement Google's explicit Resumable Upload API. We request a session URI, and then upload the video in sequential byte-chunks. If the connection fails mid-upload, the worker simply queries the session to find the last received byte and resumes exactly where it left off.
+
+### Problem 4.3: Target Privacy Status & UI Feedback Loops
+The requirements strictly state that all uploaded videos MUST be set to `unlisted`. Once uploaded, the backend must construct the YouTube watch URL and send it to the UI.
+*   **[SELECTED] Solution A (Real-time WebSocket Push):** Upload the video as `unlisted`, parse the Video ID from the API JSON response, construct the `https://youtu.be/[ID]` URL, and instantly push it directly to the frontend UI using the `websockets` library we installed in Phase 3.
+*   ~~Solution B (Synchronous UI Polling):~~ Hold the resulting YouTube link in a temporary backend status dictionary. The frontend UI will blindly poll an HTTP GET endpoint every 5 seconds until the link eventually appears.
+---
+
+## Phase 5: Frontend UI & API Integration
+
+### Problem 5.1: State Management & WebSocket Integration
+The frontend must trigger the backend API to start the pipeline and actively listen to the WebSocket channel for real-time video link updates.
+*   **[SELECTED] Solution A (Native React Hooks + WebSocket API):** Use lightweight React `useState` and `useEffect` combined with the native browser `WebSocket` API. This keeps the frontend incredibly fast, decoupled, and free of unnecessary heavy dependencies.
+*   ~~Solution B (Heavy State Libraries):~~ Implement Redux or Zustand for global state management alongside `socket.io-client`. This is highly robust but likely massive overkill for a single-page pipeline tool.
+
+### Problem 5.2: Styling & Modern Aesthetics
+The requirements demand a clean, responsive, and modern UI. You previously specified using TailwindCSS v3.
+*   **[SELECTED] Solution A (Tailwind v3 + Custom Glassmorphism):** Utilize pure Tailwind v3 utility classes combined with custom `index.css` rules to implement advanced glassmorphism, dynamic gradients, and smooth micro-animations. This creates a "WOW" factor and highly premium feel.
+*   ~~Solution B (Pre-built Component Libraries):~~ Rely on a heavy pre-built component library like Material-UI or Bootstrap. This is faster to build but often results in generic, corporate-looking interfaces that lack a truly premium aesthetic.
+
+---
+
+## Phase 6: Deployment & IP Rotation Topology
+
+### Problem 6.1: Control Plane vs. Data Plane Routing
+The analysis doc strictly dictates that we must route BotGuard challenges and InnerTube metadata through expensive Residential Proxies ($15/GB) to bypass bans, but the actual 4GB video downloads *must* be routed through cheap Datacenter/IPv6 IPs ($0.60/GB).
+*   **[SELECTED] Solution A (Dynamic `yt-dlp` Injection):** Configure the Python backend to pass a residential proxy URL specifically for the initial `yt-dlp` metadata extraction phase. However, when handing the raw stream URL over to `aria2c` for the heavy binary download, we instruct `aria2c` to bypass the proxy and use the server's default IPv6 address.
+*   ~~Solution B (Global OS Proxy):~~ Route the entire Docker container through a residential proxy. (This violates the requirements and would cost roughly $60 per 4K download).
+
+### Problem 6.2: Automated IPv6 Rotation (Environment Constraints)
+Native SLAAC and cronjob IP assignments are frequently blocked by cloud hosts (like Render) due to missing kernel privileges. Since Cloudflare WARP IPs are highly cataloged by Google, and public APIs are too slow, we must move off PaaS.
+*   **[SELECTED] Solution E (Dedicated VPS Root Routing):** We abandon PaaS hosts like Render and deploy the stack to a standard $5 Dedicated Virtual Private Server (VPS) via Hetzner or DigitalOcean. Because we have root access to the host kernel, we can safely execute the `rotate_ipv6.sh` cronjob directly on the host machine every 30 minutes, dynamically binding random IPs from our assigned `/64` block to the egress network interface.
+
+### Problem 6.3: Infrastructure as Code (VPS Topology)
+Since we are no longer using Render, we need a way to deploy this entire architecture to a raw Linux server securely.
+*   **[SELECTED] Solution A (Docker Compose + Nginx + Host Networking):** We deploy the existing `docker-compose.yml` to the VPS. To solve the Docker IPv4 NAT isolation issue, we configure the backend container with `network_mode: "host"`. This bypasses the Docker bridge, allowing the Python worker to directly inherit the host's rotating IPv6 addresses. We then install `nginx` on the host to act as a reverse proxy.
+*   ~~Solution B (Bare Metal Execution):~~ Run the Python, Node.js, and React dev servers directly on the Linux host without Docker. (Highly prone to dependency conflicts and not recommended).

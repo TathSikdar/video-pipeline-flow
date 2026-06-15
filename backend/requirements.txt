@@ -6,3 +6,5 @@ black
 flake8
 pre-commit
 python-dotenv
+camoufox[geoip]
+redis

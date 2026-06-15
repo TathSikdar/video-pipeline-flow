@@ -1,12 +1,27 @@
 version: '3.8'
 
 services:
+  redis:
+    image: redis:alpine
+    container_name: video-pipeline-redis
+    ports:
+      - "6379:6379"
+
+  botguard-provider:
+    build:
+      context: ./microservices/botguard-provider
+    container_name: video-pipeline-botguard
+    ports:
+      - "3000:3000"
+
   backend:
+    depends_on:
+      - redis
+      - botguard-provider
     build:
       context: ./backend
     container_name: video-pipeline-backend
-    ports:
-      - "8000:8000"
+    network_mode: "host"
     environment:
       - WORKSPACE_DIR=/dev/shm
     # Crucial setting for local testing: Docker defaults to 64MB for /dev/shm.

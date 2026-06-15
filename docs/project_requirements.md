@@ -21,8 +21,8 @@
 - Backend upload worker must dynamically load-balance requests and rotate OAuth2 tokens upon detecting `quotaExceeded` API error payload.
 
 ### Deployment Target
-- Frontend: Hosted on Render or GitHub Pages (static asset hosting).
-- Backend: Hosted on Render (Docker container execution environment with RAM/FFmpeg access).
+- Frontend: Hosted on Render, GitHub Pages, or a dedicated VPS via Nginx.
+- Backend: Hosted on a Dedicated Virtual Private Server (VPS) with root access (e.g., Hetzner, DigitalOcean) to allow for kernel-level IPv6 SLAAC manipulation.
 
 ---
 

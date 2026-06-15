@@ -17,17 +17,27 @@ class VideoPipelineDownloader:
         """
         Configures yt-dlp with aria2c concurrency and SABR bridging.
         """
-        return {
+        # Load the residential proxy strictly for metadata extraction
+        proxy_url = os.getenv("RESIDENTIAL_PROXY_URL", "")
+
+        options = {
             "outtmpl": os.path.join(self.workspace_dir, "%(id)s.%(ext)s"),
-            "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+            "format": "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best",
             "merge_output_format": "mp4",
             "no_continue": True,  # Prevents lingering fragments from corrupting downloads
             "external_downloader": "aria2c",
-            "external_downloader_args": ["-x", "16", "-k", "1M"],
+            # Force aria2c to bypass proxy, utilizing the raw host IPv6 address instead
+            "external_downloader_args": {
+                "aria2c": ["-x", "16", "-k", "1M", "--all-proxy="]
+            },
             "quiet": False,
             "no_warnings": False,
-            # In a full implementation, we'd inject self.sabr_adapter into the network handlers
         }
+
+        if proxy_url:
+            options["proxy"] = proxy_url
+
+        return options
 
     def process_video_strictly_synchronous(self, video_url: str):
         """
