@@ -287,9 +287,7 @@ class VideoPipelineDownloader:
         purge_workspace(self.workspace_dir)
 
         # Step 2: Generate PoToken
-        po_token = None
-        if visitor_data:
-            po_token = asyncio.run(self._fetch_po_token(video_id, visitor_data))
+        po_token = asyncio.run(self._fetch_po_token(video_id, visitor_data or ""))
 
         # Determine video size to decide if we need to chunk
         info_opts = {"quiet": True, "no_warnings": True, "extract_flat": False}
