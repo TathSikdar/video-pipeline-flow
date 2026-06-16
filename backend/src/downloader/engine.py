@@ -140,6 +140,7 @@ class VideoPipelineDownloader:
                     "-x", "16",
                     "-s", "16",
                     "-k", "1M",
+                    "--all-proxy=",
                     "--disable-ipv6=true"
                 ]
             },
@@ -149,7 +150,9 @@ class VideoPipelineDownloader:
             "geo_bypass": True,
         }
 
-        # Proxy removed for Option 1 test (direct datacenter extraction)
+        proxy_url = os.getenv("RESIDENTIAL_PROXY_URL", "")
+        if proxy_url:
+            options["proxy"] = proxy_url
 
         # Inject PoToken as extractor argument and force WEB client.
         # ANDROID_VR ignores PoTokens entirely, so stream URLs are
@@ -295,7 +298,9 @@ class VideoPipelineDownloader:
 
         # Determine video size to decide if we need to chunk
         info_opts = {"quiet": True, "no_warnings": True, "extract_flat": False, "geo_bypass": True}
-        # Proxy removed for Option 1 test (direct datacenter extraction)
+        proxy_url = os.getenv("RESIDENTIAL_PROXY_URL", "")
+        if proxy_url:
+            info_opts["proxy"] = proxy_url
 
         if po_token:
             info_opts.setdefault("extractor_args", {})
