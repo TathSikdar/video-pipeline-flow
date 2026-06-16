@@ -8,3 +8,7 @@ pre-commit
 python-dotenv
 camoufox[geoip]
 redis
+httpx
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2

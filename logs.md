@@ -51,3 +51,23 @@ This file contains a historical log of all implementation choices and technical 
 - **Reasoning**: Satisfies the strict routing constraint. BotGuard metadata challenges execute over the residential proxy ($15/GB), while the 4GB binary payloads download via the cheap, rotating host IPv6 stack ($0.60/GB).
 - **Action**: Scaffolded `rotate_ipv6.sh` and `nginx.conf`.
 - **Reasoning**: Automates the SLAAC evasion via `ip -6 addr add` binding every 30 minutes, and secures the Host-networked Docker container behind a robust reverse proxy with WebSocket upgrade support.
+
+## Production Code Implementation
+- **Action**: Rewrote `botguard-provider/server.js` and created `lib/cipher.js`, `lib/botguard.js`.
+- **Reasoning**: Converted from CommonJS to ES modules per JS style guide. Implemented ordered regex fallback patterns for signature/nsig extraction from dynamically obfuscated `base.js`. Used `bgutils-js` for BotGuard VM interpretation since reimplementing the VM would be thousands of lines and immediately stale.
+- **Action**: Rewrote `camoufox_session.py` with full Playwright integration.
+- **Reasoning**: Extracts both `VISITOR_INFO1_LIVE` cookie and `visitorData` from ytcfg, with retry and exponential backoff. Both values are required for proper BotGuard token binding.
+- **Action**: Rewrote `oauth_device_flow.py` with real Google OAuth endpoints.
+- **Reasoning**: Implements RFC 8628 Device Authorization Grant with `authorization_pending`, `slow_down`, and `expired_token` state handling. Writes tokens as `GCP_REFRESH_TOKEN_*` env vars for credential pool discovery.
+- **Action**: Rewrote `sabr_bridge.py` with full UMP varint decoding.
+- **Reasoning**: Implements the spec-mandated first-5-bits byte-length encoding, Part 34/36 extraction, and protobuf-like field parsing for stream URL recovery.
+- **Action**: Rewrote `engine.py` with BotGuard microservice integration.
+- **Reasoning**: Uses `httpx.AsyncClient` to call `/generate_pot` before each download. Injects PoToken via `yt-dlp` `extractor_args` rather than modifying yt-dlp source. Runs sync downloads in thread pool to avoid blocking the async FastAPI event loop.
+- **Action**: Rewrote `credential_pool.py` with Redis atomic operations.
+- **Reasoning**: Uses `LPOP`/`RPUSH` for atomic round-robin and `SETEX` for 24-hour exhaustion cooldown. Scans `GCP_REFRESH_TOKEN_*` env vars for automatic pool population.
+- **Action**: Rewrote `uploader.py` with `google-api-python-client`.
+- **Reasoning**: Uses `MediaFileUpload(resumable=False)` for One-Shot POST. Catches `HttpError` with status 403 and `quota` in message to trigger credential rotation.
+- **Action**: Rewrote `main.py` with Pydantic models and thread pool executor.
+- **Reasoning**: Uses `run_in_executor` to run the synchronous yt-dlp download without blocking the async event loop. Broadcasts structured JSON status updates at each lifecycle stage.
+- **Action**: Updated `App.jsx` with URL input field and auto-scroll.
+- **Reasoning**: The frontend now sends `video_url` and `title` in the POST body, enabling the user to specify what to download rather than hardcoding.
