@@ -1,18 +1,4 @@
-/**
- * @fileoverview BotGuard Proof of Origin Token generator.
- * Fetches the BotGuard challenge program from Google's JNN API,
- * executes the VM interpreter inside an isolated JSDOM environment,
- * and returns the cryptographic attestation token required by
- * YouTube's Google Video Server (GVS) to serve high-resolution
- * streams.
- *
- * This module wraps the bgutils-js library which provides the
- * reverse-engineered BotGuard VM interpreter.
- *
- * @see https://github.com/AntimatterCoder/BotGuard
- */
-
-import { BG } from 'bgutils-js';
+import { BG, base64ToU8, u8ToBase64 } from 'bgutils-js';
 import { JSDOM } from 'jsdom';
 
 /**
@@ -22,29 +8,11 @@ import { JSDOM } from 'jsdom';
 const BOTGUARD_REQUEST_KEY = 'O43z0dpjhgX20SCx4KAo';
 
 /**
- * @const {string} YouTube InnerTube API base URL.
+ * @const {string} Google API key used for WAA integrity token
+ * requests. This is the standard public key embedded in
+ * YouTube's web player.
  */
-const INNERTUBE_BASE = 'https://www.youtube.com/youtubei/v1';
-
-/**
- * @const {string} YouTube InnerTube API key for unauthenticated
- * WEB client requests.
- */
-const INNERTUBE_API_KEY = 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8';
-
-/**
- * @const {Object} Standard WEB client context for InnerTube API
- * requests. We identify as the WEB client for metadata extraction
- * as specified in the project architecture.
- */
-const WEB_CLIENT_CONTEXT = {
-  client: {
-    clientName: 'TVHTML5',
-    clientVersion: '7.20230522.00.00',
-    hl: 'en',
-    gl: 'CA',
-  },
-};
+const GOOG_API_KEY = 'AIzaSyDyT5W0Jh49F30Pqqtyfdf7pDLFKLJoAnw';
 
 /**
  * @const {string} User-Agent header matching a standard consumer
@@ -75,72 +43,25 @@ function createSterileDOM() {
 }
 
 /**
- * Fetches the BotGuard challenge data from YouTube's InnerTube
- * player API for a specific video. The response contains the
- * challenge program bytecode and interpreter metadata.
- *
- * @param {string} videoId - The YouTube video ID to generate
- *   a content-bound PoToken for.
- * @returns {Promise<Object>} The raw player response containing
- *   attestation.botguardData.
- * @throws {Error} If the InnerTube request fails.
- */
-async function fetchPlayerResponse(videoId) {
-  const url = `https://www.youtube.com/watch?v=${videoId}`;
-  const response = await fetch(url, {
-    headers: {
-      'User-Agent': USER_AGENT,
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    },
-  });
-  const html = await response.text();
-  
-  // Extract ytInitialPlayerResponse from the HTML script tags
-  const match = html.match(/ytInitialPlayerResponse\s*=\s*({.+?});var/);
-  if (match && match[1]) {
-    try {
-      return JSON.parse(match[1]);
-    } catch (e) {
-      console.error("Failed to parse ytInitialPlayerResponse JSON");
-    }
-  }
-
-  // Fallback to InnerTube API if regex extraction fails
-  const apiUrl = `${INNERTUBE_BASE}/player?key=${INNERTUBE_API_KEY}`;
-  const apiResponse = await fetch(apiUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'User-Agent': USER_AGENT,
-    },
-    body: JSON.stringify({
-      context: WEB_CLIENT_CONTEXT,
-      videoId: videoId,
-    }),
-  });
-
-  if (!apiResponse.ok) {
-    throw new Error(
-      `InnerTube player request failed: ${apiResponse.status}`
-    );
-  }
-
-  return apiResponse.json();
-}
-
-/**
  * Generates a Proof of Origin Token (PoToken) for a specific
  * YouTube video. The token cryptographically proves to YouTube's
  * Google Video Server that the request originates from a genuine
  * browser environment, not an automated scraper.
  *
+ * This function manually implements the full BotGuard attestation
+ * flow instead of using BG.PoToken.generate(). This is necessary
+ * because bgutils-js uses `instanceof Function` to validate the
+ * minting callback, which fails in JSDOM due to the cross-realm
+ * prototype chain mismatch. By manually implementing the flow,
+ * we replace `instanceof` with `typeof` checks.
+ *
  * The generation flow:
- * 1. Fetch BotGuard challenge data from InnerTube player API.
+ * 1. Fetch BotGuard challenge from YouTube's WAA API.
  * 2. Create an isolated JSDOM environment mimicking a browser.
- * 3. Use bgutils-js to create a BotGuard challenge instance.
- * 4. Execute the VM interpreter with the challenge program.
- * 5. Generate the content-bound PoToken tied to the video ID.
+ * 3. Inject and execute the VM interpreter script.
+ * 4. Create a BotGuardClient and take a snapshot.
+ * 5. Exchange the snapshot for an integrity token via GenerateIT.
+ * 6. Use the integrity token to mint a content-bound PoToken.
  *
  * @param {string} videoId - The YouTube video ID.
  * @param {string} visitorData - The visitor data string from the
@@ -156,12 +77,6 @@ async function fetchPlayerResponse(videoId) {
  */
 export async function generatePoToken(videoId, visitorData) {
   const dom = createSterileDOM();
-
-  // Patch JSDOM's Function constructor to match Node.js's.
-  // The BotGuard VM creates functions inside the JSDOM realm.
-  // bgutils-js checks `mintCallback instanceof Function` using
-  // Node.js's Function, which fails for cross-realm objects.
-  dom.window.Function = Function;
 
   try {
     // Step 1: Fetch the BotGuard challenge from the WAA backend API
@@ -182,19 +97,28 @@ export async function generatePoToken(videoId, visitorData) {
     } = challengeData;
 
     // Step 2: Extract and inject the VM interpreter script
-    let interpreterCode = interpreterJavascript.privateDoNotAccessOrElseSafeScriptWrappedValue;
+    let interpreterCode = interpreterJavascript
+      .privateDoNotAccessOrElseSafeScriptWrappedValue;
 
     if (!interpreterCode) {
-      const safeUrl = interpreterJavascript.privateDoNotAccessOrElseTrustedResourceUrlWrappedValue;
+      const safeUrl = interpreterJavascript
+        .privateDoNotAccessOrElseTrustedResourceUrlWrappedValue;
       if (!safeUrl) {
-        throw new Error('No interpreter script or URL provided by WAA API.');
+        throw new Error(
+          'No interpreter script or URL provided by WAA API.'
+        );
       }
-      const interpreterUrl = safeUrl.startsWith('//') ? `https:${safeUrl}` : safeUrl;
+      const interpreterUrl = safeUrl.startsWith('//')
+        ? `https:${safeUrl}`
+        : safeUrl;
       const interpreterResponse = await fetch(interpreterUrl, {
         headers: { 'User-Agent': USER_AGENT }
       });
       if (!interpreterResponse.ok) {
-        throw new Error(`Failed to fetch BotGuard interpreter: ${interpreterResponse.status}`);
+        throw new Error(
+          `Failed to fetch BotGuard interpreter: `
+          + `${interpreterResponse.status}`
+        );
       }
       interpreterCode = await interpreterResponse.text();
     }
@@ -203,26 +127,96 @@ export async function generatePoToken(videoId, visitorData) {
     scriptEl.textContent = interpreterCode;
     dom.window.document.head.appendChild(scriptEl);
 
-    // Step 3: Generate the content-bound PoToken
-    const result = await BG.PoToken.generate({
+    // Step 3: Create BotGuardClient and take a snapshot
+    // We use BG.BotGuardClient directly instead of
+    // BG.PoToken.generate() to avoid the cross-realm
+    // `instanceof Function` check in WebPoMinter.
+    const botguard = await BG.BotGuardClient.create({
       program: challengeProgram,
       globalName: globalName,
-      contentBinding: videoId,
-      bgConfig: {
-        globalObj: dom.window,
-        fetch: globalThis.fetch,
-        identifier: visitorData,
-        requestKey: BOTGUARD_REQUEST_KEY,
-        useYouTubeAPI: true
-      }
+      globalObj: dom.window,
     });
 
+    const webPoSignalOutput = [];
+    const botguardResponse = await botguard.snapshot({
+      webPoSignalOutput,
+    });
+
+    // Step 4: Exchange the snapshot for an integrity token
+    const payload = [BOTGUARD_REQUEST_KEY, botguardResponse];
+    const itResponse = await fetch(
+      'https://www.youtube.com/api/jnn/v1/GenerateIT',
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json+protobuf',
+          'x-goog-api-key': GOOG_API_KEY,
+          'x-user-agent': 'grpc-web-javascript/0.1',
+          'user-agent': USER_AGENT,
+        },
+        body: JSON.stringify(payload),
+      }
+    );
+
+    if (!itResponse.ok) {
+      throw new Error(
+        `GenerateIT request failed: ${itResponse.status}`
+      );
+    }
+
+    const itJson = await itResponse.json();
+    const [
+      integrityToken,
+      estimatedTtlSecs,
+    ] = itJson;
+
+    if (!integrityToken) {
+      throw new Error(
+        'GenerateIT returned no integrity token.'
+      );
+    }
+
+    // Step 5: Mint the PoToken manually
+    // This replaces WebPoMinter.create() which uses the broken
+    // `instanceof Function` cross-realm check.
+    const getMinter = webPoSignalOutput[0];
+    if (!getMinter) {
+      throw new Error(
+        'BotGuard VM did not produce a minting function '
+        + '(PMD:Undefined).'
+      );
+    }
+
+    const mintCallback = await getMinter(
+      base64ToU8(integrityToken)
+    );
+
+    if (typeof mintCallback !== 'function') {
+      throw new Error(
+        'Minting callback is not callable '
+        + `(type: ${typeof mintCallback}).`
+      );
+    }
+
+    // Mint a token bound to the visitor data identifier
+    const identifier = visitorData || videoId;
+    const rawToken = await mintCallback(
+      new TextEncoder().encode(identifier)
+    );
+
+    if (!rawToken) {
+      throw new Error('Minting returned null (YNJ:Undefined).');
+    }
+
+    const poToken = u8ToBase64(rawToken, true);
+
     return {
-      poToken: result.poToken,
+      poToken: poToken,
       visitorData: visitorData,
-      ttlSeconds: result.integrityTokenData?.estimatedTtlSecs || 21600,
+      ttlSeconds: estimatedTtlSecs || 21600,
     };
   } finally {
+    // Always clean up the JSDOM instance to prevent memory leaks
     dom.window.close();
   }
 }
