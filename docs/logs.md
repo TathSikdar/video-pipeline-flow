@@ -93,6 +93,9 @@ This file contains a historical log of all implementation choices and technical 
 - **Reasoning**: The `/generate_pot` endpoint was returning HTTP 400 Bad Request when receiving an empty string for `visitorData`. Removing the strict falsy check allows the creation of unbound PoTokens.
 - **Action**: Corrected `playerAttestationRenderer` JSON extraction path and spoofed `TVHTML5_SIMPLY_EMBEDDED_PLAYER`.
 - **Reasoning**: YouTube recently stopped serving BotGuard payloads in the `/player` response for generic `WEB` clients. By spoofing the Embedded Smart TV client identity, YouTube is forced to serve the BotGuard challenge inline, which is now correctly extracted via the new nested JSON renderer path.
+- **Action**: Rewrote `fetchPlayerResponse` to natively scrape the `youtube.com/watch` HTML page instead of querying the InnerTube `/player` API.
+- **Reasoning**: The InnerTube API was aggressively throwing `LOGIN_REQUIRED: Sign in to confirm you’re not a bot` when accessed from the Residential Proxy without a valid `visitorData` or cookie session. By directly fetching the public webpage HTML and extracting the embedded `ytInitialPlayerResponse` JSON natively from the DOM, the microservice perfectly masquerades as an initial browser load, successfully bypassing the API-level bot traps.
+
 
 
 ## Performance Benchmarks & Validation

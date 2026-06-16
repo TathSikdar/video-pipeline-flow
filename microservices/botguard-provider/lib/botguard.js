@@ -161,11 +161,8 @@ export async function generatePoToken(videoId, visitorData) {
     playerResponse?.attestation?.playerAttestationRenderer?.botguardData;
 
   if (!botguardData) {
-    const errorBody = JSON.stringify(playerResponse).substring(0, 500);
-    throw new Error(
-      'No botguardData found in player response. '
-      + 'Response: ' + errorBody
-    );
+    console.warn('No botguardData found in player response. Returning null.');
+    return null;
   }
 
   const {

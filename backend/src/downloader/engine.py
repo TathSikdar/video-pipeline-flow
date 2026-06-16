@@ -77,7 +77,7 @@ class VideoPipelineDownloader:
             "quiet": True,
             "no_warnings": True,
             "extract_flat": False,
-            "geo_bypass": False,
+            "geo_bypass": True,
         }
         
         if proxy_url:
@@ -150,7 +150,7 @@ class VideoPipelineDownloader:
             "quiet": False,
             "no_warnings": False,
             "color": "no_color",
-            "geo_bypass": False,
+            "geo_bypass": True,
         }
 
         if proxy_url:
@@ -293,7 +293,7 @@ class VideoPipelineDownloader:
         po_token = asyncio.run(self._fetch_po_token(video_id, visitor_data or ""))
 
         # Determine video size to decide if we need to chunk
-        info_opts = {"quiet": True, "no_warnings": True, "extract_flat": False, "geo_bypass": False}
+        info_opts = {"quiet": True, "no_warnings": True, "extract_flat": False, "geo_bypass": True}
         proxy_url = os.getenv("RESIDENTIAL_PROXY_URL", "")
         if proxy_url:
             info_opts["proxy"] = proxy_url
