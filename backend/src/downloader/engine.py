@@ -327,7 +327,10 @@ class VideoPipelineDownloader:
                 logger.info("Video size %.2f GB under threshold. Triggering standard RAM disk workflow.", filesize / (1024**3))
                 return self._process_single_shot(video_id, video_url, ydl_opts, progress_callback, direct_to_hdd=False)
         except Exception as exc:
-            logger.error("Unexpected error during download of %s: %s", video_id, str(exc))
+            if type(exc).__name__ == 'TaskCancelledError':
+                logger.info("Download cancelled for %s", video_id)
+            else:
+                logger.error("Unexpected error during download of %s: %s", video_id, str(exc))
             purge_workspace(self.workspace_dir)
             raise
 

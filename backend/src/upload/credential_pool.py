@@ -1,231 +1,116 @@
-"""Credential Pool Manager.
+"""Credential Pool for YouTube Data API.
 
-Handles YouTube Data API OAuth refresh token rotation to bypass
-the 10,000 daily quota unit limit. Utilizes Redis for cross-node
-state synchronization with atomic round-robin operations, falling
-back to a local in-memory pool if Redis is unreachable.
-
-The pool supports multiple GCP project tokens loaded from
-environment variables matching the pattern GCP_REFRESH_TOKEN_*.
-When a token's quota is exhausted (detected via 403 quotaExceeded),
-the pool atomically rotates to the next available token.
+Dynamically loads multiple GCP project credentials from environment variables
+(GCP_CLIENT_ID_1, GCP_CLIENT_ID_2, etc.) and provides a thread-safe
+round-robin rotating pool to distribute API quota across multiple projects.
 """
 
 import logging
 import os
-import re
-from typing import Optional
-
-import httpx
-import redis
+import threading
+import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
+from typing import List, Tuple, Optional
 
 logger = logging.getLogger(__name__)
 
-# Google OAuth 2.0 token exchange endpoint
-TOKEN_URL = "https://oauth2.googleapis.com/token"
-
-# GCP Client credentials for token exchange
-GCP_CLIENT_ID = os.getenv("GCP_CLIENT_ID", "")
-GCP_CLIENT_SECRET = os.getenv("GCP_CLIENT_SECRET", "")
-
-# Redis key names
-REDIS_TOKEN_LIST = "credential_pool:tokens"
-REDIS_EXHAUSTED_SET = "credential_pool:exhausted"
-
-# Exhausted token cooldown period (24 hours in seconds)
-EXHAUSTED_TTL = 86400
-
 
 class CredentialPool:
-    """Manages a rotating pool of YouTube API OAuth tokens.
+    """Thread-safe round-robin credential pool."""
+    
+    _instance = None
+    _lock = threading.Lock()
 
-    Supports two operational modes:
-    - Redis mode: Tokens are stored in a Redis list and rotated
-      atomically using LPOP/RPUSH. Exhausted tokens are moved
-      to a sorted set with a 24-hour TTL.
-    - Memory mode: Tokens are loaded from environment variables
-      and rotated via a simple index counter.
+    def __new__(cls):
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = super(CredentialPool, cls).__new__(cls)
+                cls._instance._initialize()
+            return cls._instance
 
-    Attributes:
-        redis_client: The Redis connection, or None if offline.
-    """
+    def _initialize(self):
+        """Discovers credentials from the environment."""
+        self.credentials: List[Tuple[str, str, str]] = []
+        self.current_index = 0
+        self._pool_lock = threading.Lock()
+        
+        # Track exhausted IDs in memory with timestamps
+        self.exhausted_projects = {}
+        self.exhausted_accounts = {}
 
-    def __init__(
-        self,
-        redis_url: str = "redis://redis:6379/0",
-    ) -> None:
-        """Initializes the credential pool.
+        # Scan the environment for GCP_CLIENT_ID_*
+        for key, client_id in os.environ.items():
+            if key.startswith("GCP_CLIENT_ID_") and client_id:
+                suffix = key.replace("GCP_CLIENT_ID_", "")
+                
+                client_secret = os.environ.get(f"GCP_CLIENT_SECRET_{suffix}")
+                refresh_token = os.environ.get(f"GCP_REFRESH_TOKEN_{suffix}")
 
-        Attempts to connect to Redis. If the connection fails,
-        falls back to loading tokens from environment variables.
+                if client_secret and refresh_token:
+                    self.credentials.append((client_id, client_secret, refresh_token))
+                    logger.info("Loaded credentials for project index: %s", suffix)
+                else:
+                    logger.warning("Found %s but missing secret or refresh token for index %s", key, suffix)
 
-        Args:
-            redis_url: The Redis connection URL.
-        """
-        self.redis_client: Optional[redis.Redis] = None
-        self._memory_pool: list[str] = []
-        self._current_index: int = 0
-
-        try:
-            self.redis_client = redis.Redis.from_url(redis_url, socket_timeout=2)
-            self.redis_client.ping()
-            logger.info("Connected to Redis credential pool.")
-            self._sync_tokens_to_redis()
-        except redis.ConnectionError:
-            logger.warning("Redis unreachable. " "Falling back to in-memory pool.")
-            self.redis_client = None
-            self._load_memory_pool()
-
-    def _load_memory_pool(self) -> None:
-        """Loads all tokens from environment variables.
-
-        Scans the environment for variables matching the pattern
-        GCP_REFRESH_TOKEN_* and loads them into the memory pool.
-        """
-        token_pattern = re.compile(r"^GCP_REFRESH_TOKEN_\d+$")
-
-        for key, value in sorted(os.environ.items()):
-            if token_pattern.match(key) and value:
-                self._memory_pool.append(value)
-
-        if not self._memory_pool:
-            logger.warning(
-                "No GCP_REFRESH_TOKEN_* variables found. "
-                "Upload functionality will be unavailable."
-            )
+        if not self.credentials:
+            logger.error("No valid GCP credentials found in the environment. Uploads will fail.")
         else:
-            logger.info(
-                "Loaded %d tokens into memory pool.",
-                len(self._memory_pool),
-            )
+            logger.info("CredentialPool initialized with %d projects.", len(self.credentials))
 
-    def _sync_tokens_to_redis(self) -> None:
-        """Seeds Redis with tokens from environment variables.
+    def get_next_credential(self) -> Optional[Tuple[str, str, str]]:
+        """Returns the next valid credential set in a round-robin.
 
-        Only adds tokens that are not already present in the
-        Redis list. This ensures idempotent container restarts
-        do not duplicate tokens.
-        """
-        if not self.redis_client:
-            return
-
-        token_pattern = re.compile(r"^GCP_REFRESH_TOKEN_\d+$")
-
-        existing = self.redis_client.lrange(REDIS_TOKEN_LIST, 0, -1)
-        existing_set = {t.decode("utf-8") for t in existing}
-
-        added = 0
-        for key, value in sorted(os.environ.items()):
-            if token_pattern.match(key) and value and value not in existing_set:
-                self.redis_client.rpush(REDIS_TOKEN_LIST, value)
-                added += 1
-
-        if added > 0:
-            logger.info("Synced %d new tokens to Redis.", added)
-
-    def get_active_token(self) -> Optional[str]:
-        """Retrieves the current active OAuth refresh token.
-
-        In Redis mode, peeks at the head of the token list
-        without removing it. In memory mode, returns the token
-        at the current index.
+        Automatically skips any credentials tied to an exhausted Project
+        or an exhausted Account.
 
         Returns:
-            The active refresh token string, or None if the
-            pool is empty.
+            Tuple of (client_id, client_secret, refresh_token) or None if all are exhausted.
         """
-        if self.redis_client:
-            token = self.redis_client.lindex(REDIS_TOKEN_LIST, 0)
-            if token:
-                return token.decode("utf-8")
+        if not self.credentials:
             return None
 
-        if not self._memory_pool:
-            return None
-        return self._memory_pool[self._current_index]
-
-    def rotate_token(self) -> None:
-        """Marks the current token as exhausted and rotates.
-
-        In Redis mode, atomically pops the exhausted token from
-        the head, adds it to the exhausted sorted set with a
-        24-hour TTL, and the next token becomes the new head.
-
-        In memory mode, advances the index to the next token
-        in the round-robin list.
-        """
-        logger.info("Rotating OAuth credentials " "due to quota exhaustion...")
-
-        if self.redis_client:
-            exhausted = self.redis_client.lpop(REDIS_TOKEN_LIST)
-            if exhausted:
-                self.redis_client.setex(
-                    f"{REDIS_EXHAUSTED_SET}:" f'{exhausted.decode("utf-8")}',
-                    EXHAUSTED_TTL,
-                    "1",
-                )
-                logger.info("Token moved to exhausted set " "(24h cooldown).")
-
-            remaining = self.redis_client.llen(REDIS_TOKEN_LIST)
-            logger.info("%d tokens remaining in pool.", remaining)
-        else:
-            if self._memory_pool:
-                self._current_index = (self._current_index + 1) % len(self._memory_pool)
-                logger.info(
-                    "Rotated to token index %d.",
-                    self._current_index,
-                )
-
-    def exchange_refresh_for_access(
-        self,
-        refresh_token: str,
-    ) -> Optional[str]:
-        """Exchanges a refresh token for a short-lived access token.
-
-        Posts to Google's OAuth token endpoint with the refresh
-        token and TVHTML5 client credentials to obtain an access
-        token valid for approximately 1 hour.
-
-        Args:
-            refresh_token: The OAuth 2.0 refresh token.
-
-        Returns:
-            The access token string, or None if the exchange
-            fails.
-        """
-        try:
-            with httpx.Client(timeout=15.0) as client:
-                response = client.post(
-                    TOKEN_URL,
-                    data={
-                        "client_id": GCP_CLIENT_ID,
-                        "client_secret": GCP_CLIENT_SECRET,
-                        "refresh_token": refresh_token,
-                        "grant_type": "refresh_token",
-                    },
-                )
-                response.raise_for_status()
-
-                data = response.json()
-                access_token = data.get("access_token")
-
-                if access_token:
-                    logger.info(
-                        "Access token obtained " "(expires in %ds).",
-                        data.get("expires_in", 0),
-                    )
-                return access_token
-
-        except httpx.HTTPError as exc:
-            logger.error("Token exchange failed: %s", str(exc))
+        with self._pool_lock:
+            # Try to find a valid credential up to N times (pool size)
+            for _ in range(len(self.credentials)):
+                client_id, client_secret, refresh_token = self.credentials[self.current_index]
+                self.current_index = (self.current_index + 1) % len(self.credentials)
+                
+                now_pt = datetime.now(tz=ZoneInfo("America/Los_Angeles"))
+                
+                # Helper to check if a ban has expired (passed midnight PT)
+                def is_expired(ban_timestamp: float) -> bool:
+                    ban_time_pt = datetime.fromtimestamp(ban_timestamp, tz=ZoneInfo("America/Los_Angeles"))
+                    return now_pt.date() > ban_time_pt.date()
+                
+                # Check if this combination uses a banned project
+                if client_id in self.exhausted_projects:
+                    if not is_expired(self.exhausted_projects[client_id]):
+                        continue
+                    else:
+                        del self.exhausted_projects[client_id]
+                        
+                # Check if this combination uses a banned account
+                if refresh_token in self.exhausted_accounts:
+                    if not is_expired(self.exhausted_accounts[refresh_token]):
+                        continue
+                    else:
+                        del self.exhausted_accounts[refresh_token]
+                    
+                return (client_id, client_secret, refresh_token)
+                
+            # If the loop finishes without returning, everything is exhausted
             return None
 
-    def pool_size(self) -> int:
-        """Returns the number of tokens currently in the pool.
+    def mark_exhausted(self, client_id: str, refresh_token: str, reason: str) -> None:
+        """Bans a specific Project or Account from being used again."""
+        with self._pool_lock:
+            if reason == "quotaExceeded":
+                logger.warning("Banning GCP Project: %s (API Quota Exhausted until Midnight PT)", client_id[:15] + "...")
+                self.exhausted_projects[client_id] = time.time()
+            elif reason in ("uploadLimitExceeded", "invalid_grant"):
+                logger.warning("Banning YouTube Account: %s (Limit Exhausted or Invalid Grant until Midnight PT)", refresh_token[:15] + "...")
+                self.exhausted_accounts[refresh_token] = time.time()
 
-        Returns:
-            The token count.
-        """
-        if self.redis_client:
-            return self.redis_client.llen(REDIS_TOKEN_LIST)
-        return len(self._memory_pool)
+    def get_pool_size(self) -> int:
+        return len(self.credentials)

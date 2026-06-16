@@ -3,13 +3,14 @@ export function TaskProgress({ task }) {
     task.status !== 'downloading' &&
     task.status !== 'uploading' &&
     task.status !== 'preparing' &&
+    task.status !== 'upload_queued' &&
     task.status !== 'completed'
   ) {
     return null;
   }
 
   return (
-    <div className="space-y-4 mb-4">
+    <div className="space-y-4">
       {/* Download Bar */}
       <div>
         <div className="flex justify-between text-xs text-gray-400 mb-1">

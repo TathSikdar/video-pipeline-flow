@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 
-export const useWebSocket = (url) => {
+export const useWebSocket = (url, onMessage) => {
     const [messages, setMessages] = useState([]);
     const [isConnected, setIsConnected] = useState(false);
     const wsRef = useRef(null);
@@ -19,10 +19,14 @@ export const useWebSocket = (url) => {
             try {
                 // Handle structured JSON
                 const data = JSON.parse(event.data);
-                setMessages(prev => [...prev, { ...data, timestamp: Date.now() }]);
+                const msg = { ...data, timestamp: Date.now() };
+                setMessages(prev => [...prev, msg]);
+                if (onMessage) onMessage(msg);
             } catch (e) {
                 // Handle plain text
-                setMessages(prev => [...prev, { type: 'info', text: event.data, timestamp: Date.now() }]);
+                const msg = { type: 'info', text: event.data, timestamp: Date.now() };
+                setMessages(prev => [...prev, msg]);
+                if (onMessage) onMessage(msg);
             }
         };
         

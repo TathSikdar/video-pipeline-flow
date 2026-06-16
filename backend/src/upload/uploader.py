@@ -2,8 +2,7 @@
 
 Uploads 1080p MP4 files to YouTube using the Data API v3 with a
 standard One-Shot POST request. Enforces the 'unlisted' privacy
-status on all uploads. Catches 403 quotaExceeded errors to trigger
-automatic credential rotation via the CredentialPool.
+status on all uploads.
 
 The One-Shot approach avoids the complexity of Google's Resumable
 Upload protocol. Since we enforce a strict 1080p resolution cap in
@@ -16,57 +15,37 @@ import os
 from typing import Optional
 
 from google.oauth2.credentials import Credentials
+from google.auth.exceptions import RefreshError
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
-from .credential_pool import CredentialPool
-
 logger = logging.getLogger(__name__)
 
-# Maximum number of upload retry attempts on quota exhaustion
-MAX_ROTATION_RETRIES = 5
-
-# GCP Client credentials for token refresh
-GCP_CLIENT_ID = os.getenv("GCP_CLIENT_ID", "")
-GCP_CLIENT_SECRET = os.getenv("GCP_CLIENT_SECRET", "")
+# GCP token URI
 TOKEN_URI = "https://oauth2.googleapis.com/token"
 
 
 class YouTubeUploader:
     """Uploads videos to YouTube via the Data API v3.
 
-    Uses the CredentialPool to obtain OAuth tokens and
-    automatically rotates credentials when quota limits are
-    reached.
-
-    Attributes:
-        cred_pool: The CredentialPool managing OAuth tokens.
+    Uses a single GCP refresh token to obtain OAuth tokens.
     """
 
-    def __init__(
-        self,
-        redis_url: str = "redis://redis:6379/0",
-    ) -> None:
-        """Initializes the uploader with a credential pool.
+    def __init__(self) -> None:
+        """Initializes the uploader."""
+        pass
 
-        Args:
-            redis_url: Redis connection URL for the credential
-                pool. Falls back to in-memory if unreachable.
-        """
-        self.cred_pool = CredentialPool(redis_url=redis_url)
-
-    def _build_youtube_service(
-        self,
-        refresh_token: str,
-    ):
+    def _build_youtube_service(self, client_id: str, client_secret: str, refresh_token: str):
         """Constructs an authenticated YouTube API service.
 
         Creates OAuth2 credentials from the refresh token and
         builds a YouTube Data API v3 service client.
 
         Args:
-            refresh_token: The OAuth 2.0 refresh token.
+            client_id: The GCP client ID.
+            client_secret: The GCP client secret.
+            refresh_token: The GCP refresh token.
 
         Returns:
             A googleapiclient Resource object for the YouTube
@@ -76,8 +55,8 @@ class YouTubeUploader:
             token=None,
             refresh_token=refresh_token,
             token_uri=TOKEN_URI,
-            client_id=GCP_CLIENT_ID,
-            client_secret=GCP_CLIENT_SECRET,
+            client_id=client_id,
+            client_secret=client_secret,
         )
 
         return build(
@@ -97,9 +76,7 @@ class YouTubeUploader:
         """Uploads a video to YouTube as unlisted.
 
         Executes a One-Shot HTTP POST upload using the YouTube
-        Data API v3 videos.insert endpoint. If a 403
-        quotaExceeded error is received, rotates to the next
-        credential and retries.
+        Data API v3 videos.insert endpoint.
 
         Args:
             file_path: Absolute path to the MP4 file.
@@ -108,11 +85,11 @@ class YouTubeUploader:
 
         Returns:
             The YouTube watch URL (https://youtu.be/VIDEO_ID),
-            or None if all credentials are exhausted.
+            or None if the upload fails.
 
         Raises:
             FileNotFoundError: If the video file does not exist.
-            HttpError: If a non-quota API error occurs.
+            HttpError: If an API error occurs.
         """
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"Video file not found: {file_path}")
@@ -124,22 +101,20 @@ class YouTubeUploader:
             file_size_mb,
         )
 
-        for attempt in range(1, MAX_ROTATION_RETRIES + 1):
-            refresh_token = self.cred_pool.get_active_token()
+        from .credential_pool import CredentialPool
+        pool = CredentialPool()
+        max_attempts = max(1, pool.get_pool_size())
 
-            if not refresh_token:
-                logger.error("No tokens available in credential pool.")
+        for attempt in range(max_attempts):
+            creds = pool.get_next_credential()
+            if not creds:
+                logger.error("No valid credentials in pool.")
                 return None
-
-            logger.info(
-                "Upload attempt %d/%d using token: %s...",
-                attempt,
-                MAX_ROTATION_RETRIES,
-                refresh_token[:8],
-            )
+                
+            client_id, client_secret, refresh_token = creds
 
             try:
-                youtube = self._build_youtube_service(refresh_token)
+                youtube = self._build_youtube_service(client_id, client_secret, refresh_token)
 
                 body = {
                     "snippet": {
@@ -176,17 +151,11 @@ class YouTubeUploader:
                 video_id = response.get("id")
 
                 if not video_id:
-                    logger.error(
-                        "Upload response missing video ID: %s",
-                        response,
-                    )
+                    logger.error("Upload response missing video ID: %s", response)
                     return None
 
                 watch_url = f"https://youtu.be/{video_id}"
-                logger.info(
-                    "Upload successful! " "Privacy: unlisted. URL: %s",
-                    watch_url,
-                )
+                logger.info("Upload successful! Privacy: unlisted. URL: %s", watch_url)
 
                 return watch_url
 
@@ -197,20 +166,23 @@ class YouTubeUploader:
                         if isinstance(detail, dict):
                             error_reason = detail.get("reason", "")
 
-                if exc.resp.status == 403 and "quota" in str(exc).lower():
-                    logger.warning(
-                        "Quota exhausted for current token. " "Rotating credentials..."
-                    )
-                    self.cred_pool.rotate_token()
+                if error_reason in ("quotaExceeded", "uploadLimitExceeded"):
+                    logger.warning("Quota/Upload limit exceeded for project (attempt %d/%d). Trying next credential...", attempt + 1, max_attempts)
+                    pool.mark_exhausted(client_id, refresh_token, error_reason)
                     continue
 
                 logger.error(
-                    "YouTube API error (status=%d, " "reason=%s): %s",
+                    "YouTube API error (status=%d, reason=%s): %s",
                     exc.resp.status,
                     error_reason,
                     str(exc),
                 )
                 raise
 
-        logger.error("All credential rotation attempts exhausted.")
+            except RefreshError as exc:
+                logger.warning("Invalid or revoked refresh token (attempt %d/%d). Trying next credential...", attempt + 1, max_attempts)
+                pool.mark_exhausted(client_id, refresh_token, "invalid_grant")
+                continue
+
+        logger.error("All credentials in the pool have exhausted their daily quota.")
         return None

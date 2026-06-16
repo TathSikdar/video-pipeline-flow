@@ -34,9 +34,6 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-GCP_CLIENT_ID = os.getenv("GCP_CLIENT_ID")
-GCP_CLIENT_SECRET = os.getenv("GCP_CLIENT_SECRET")
-
 # Google OAuth 2.0 endpoints
 DEVICE_CODE_URL = "https://oauth2.googleapis.com/device/code"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -50,6 +47,7 @@ ENV_FILE_PATH = Path(__file__).resolve().parent.parent / ".env"
 
 def request_device_code(
     client: httpx.Client,
+    client_id: str,
 ) -> dict:
     """Initiates the device authorization flow.
 
@@ -59,6 +57,7 @@ def request_device_code(
 
     Args:
         client: An httpx client instance for making requests.
+        client_id: The GCP client ID.
 
     Returns:
         A dictionary containing device_code, user_code,
@@ -70,7 +69,7 @@ def request_device_code(
     response = client.post(
         DEVICE_CODE_URL,
         data={
-            "client_id": GCP_CLIENT_ID,
+            "client_id": client_id,
             "scope": YOUTUBE_UPLOAD_SCOPE,
         },
     )
@@ -83,6 +82,8 @@ def poll_for_token(
     device_code: str,
     interval: int,
     expires_in: int,
+    client_id: str,
+    client_secret: str,
 ) -> Optional[dict]:
     """Polls the token endpoint until the user grants access.
 
@@ -97,6 +98,8 @@ def poll_for_token(
         device_code: The device code from the authorization step.
         interval: Minimum seconds between polling requests.
         expires_in: Total seconds before the device code expires.
+        client_id: The GCP client ID.
+        client_secret: The GCP client secret.
 
     Returns:
         A dictionary containing access_token, refresh_token,
@@ -112,8 +115,8 @@ def poll_for_token(
         response = client.post(
             TOKEN_URL,
             data={
-                "client_id": GCP_CLIENT_ID,
-                "client_secret": GCP_CLIENT_SECRET,
+                "client_id": client_id,
+                "client_secret": client_secret,
                 "device_code": device_code,
                 "grant_type": ("urn:ietf:params:oauth:grant-type:device_code"),
             },
@@ -152,18 +155,17 @@ def poll_for_token(
 
 def write_token_to_env(
     refresh_token: str,
-    token_index: int = 1,
+    index: str,
 ) -> None:
     """Appends or updates a refresh token in the .env file.
 
-    Writes the token as GCP_REFRESH_TOKEN_{index} to enable
-    the credential pool to discover and rotate multiple tokens.
+    Writes the token as GCP_REFRESH_TOKEN_{index}.
 
     Args:
         refresh_token: The OAuth 2.0 refresh token string.
-        token_index: The numeric index for this token in the pool.
+        index: The project index string (e.g., '1', '2').
     """
-    env_key = f"GCP_REFRESH_TOKEN_{token_index}"
+    env_key = f"GCP_REFRESH_TOKEN_{index}"
     env_line = f"{env_key}={refresh_token}\n"
 
     # Read existing content if the file exists
@@ -204,19 +206,31 @@ def execute_device_flow() -> None:
     Raises:
         SystemExit: If the authorization flow fails.
     """
-    logger.info("Initiating OAuth 2.0 Device Authorization Grant...")
+    print("\n" + "=" * 50)
+    print("  YouTube OAuth Device Flow Configuration")
+    print("=" * 50)
+    index = input("Enter the project index to configure (e.g., 1, 2, 3): ").strip()
 
-    if not GCP_CLIENT_ID or not GCP_CLIENT_SECRET:
+    if not index:
+        logger.error("Project index cannot be empty.")
+        sys.exit(1)
+
+    client_id = os.getenv(f"GCP_CLIENT_ID_{index}")
+    client_secret = os.getenv(f"GCP_CLIENT_SECRET_{index}")
+
+    if not client_id or not client_secret:
         logger.error(
-            "GCP_CLIENT_ID or GCP_CLIENT_SECRET is missing from the .env file. "
+            f"GCP_CLIENT_ID_{index} or GCP_CLIENT_SECRET_{index} is missing from the .env file. "
             "Please create a 'TVs and Limited Input devices' OAuth Client ID "
             "in the Google Cloud Console and add the credentials to backend/.env."
         )
         sys.exit(1)
 
+    logger.info("Initiating OAuth 2.0 Device Authorization Grant for project %s...", index)
+
     with httpx.Client(timeout=30.0) as client:
         # Step 1: Request device code
-        device_data = request_device_code(client)
+        device_data = request_device_code(client, client_id)
 
         device_code = device_data["device_code"]
         user_code = device_data["user_code"]
@@ -234,7 +248,7 @@ def execute_device_flow() -> None:
         print("=" * 50 + "\n")
 
         # Step 3: Poll for authorization
-        token_data = poll_for_token(client, device_code, interval, expires_in)
+        token_data = poll_for_token(client, device_code, interval, expires_in, client_id, client_secret)
 
         if not token_data:
             logger.error("Device flow failed. Exiting.")
@@ -244,12 +258,12 @@ def execute_device_flow() -> None:
         refresh_token = token_data.get("refresh_token")
         if not refresh_token:
             logger.error(
-                "No refresh_token in response. " "Full response: %s",
+                "No refresh_token in response. Full response: %s",
                 json.dumps(token_data, indent=2),
             )
             sys.exit(1)
 
-        write_token_to_env(refresh_token)
+        write_token_to_env(refresh_token, index)
 
         logger.info(
             "Device flow completed successfully! " "Refresh token is ready for use."

@@ -94,6 +94,22 @@ Uploading multi-gigabyte 4K videos directly from the Render Docker container can
 The requirements strictly state that all uploaded videos MUST be set to `unlisted`. Once uploaded, the backend must construct the YouTube watch URL and send it to the UI.
 *   **[SELECTED] Solution A (Real-time WebSocket Push):** Upload the video as `unlisted`, parse the Video ID from the API JSON response, construct the `https://youtu.be/[ID]` URL, and instantly push it directly to the frontend UI using the `websockets` library we installed in Phase 3.
 *   ~~Solution B (Synchronous UI Polling):~~ Hold the resulting YouTube link in a temporary backend status dictionary. The frontend UI will blindly poll an HTTP GET endpoint every 5 seconds until the link eventually appears.
+
+### Problem 4.4: Synchronous Pipeline Blocking
+Because tasks originally ran in a single loop, Video 2 would have to wait to download until Video 1 completely finished uploading.
+*   **[SELECTED] Solution A (Dual-Queue Pipelining):** Re-architect the backend to use completely independent `download_queue` and `upload_queue` workers. This allows the system to seamlessly download Video N+1 into the RAM disk while Video N is concurrently uploading from physical storage to YouTube, maximizing throughput.
+*   ~~Solution B (Sequential Blocking):~~ Maintain the monolithic pipeline queue where everything runs strictly sequentially in one worker.
+
+### Problem 4.5: Multi-Project Quota Scaling & Smart Routing
+The default YouTube Data API v3 quota is extremely strict (100 uploads per project per day), and YouTube Channel upload limits are even stricter (~10-100 per day).
+*   **[SELECTED] Solution A (Smart Quota Routing & Timezone Reset):** We scale horizontally by allowing unlimited GCP projects and YouTube Accounts. The `.env` file maps combinations using suffixes (`_1`, `_2`, etc.). A `CredentialPool` singleton dynamically discovers these at startup. 
+    *   If an upload throws a 403 `quotaExceeded` error, it permanently bans that **GCP Client ID** from the pool. 
+    *   If it throws a 403 `uploadLimitExceeded` or a 400 `invalid_grant` (dead token), it permanently bans that **YouTube Account's Refresh Token** from the pool.
+    *   The system silently grabs the next valid, unbanned combination and instantly retries the upload without failing the active task or alerting the UI.
+    *   All bans automatically expire precisely at Midnight Pacific Time (3:00 AM EST), exactly matching Google's internal API reset clocks, rather than using a rigid 24-hour math cooldown.
+*   ~~Solution B (Redis Distributed Pool):~~ Use Redis to manage token states. (Overkill for a local single-node architecture).
+*   ~~Solution C (Hardcoded Fallbacks):~~ Hardcode exactly two sets of credentials into the python script. (Not scalable and blindly wastes time retrying exhausted accounts).
+
 ---
 
 ## Phase 5: Frontend UI & API Integration
