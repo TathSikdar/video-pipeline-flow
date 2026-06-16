@@ -125,16 +125,7 @@ class VideoPipelineDownloader:
             ),
             "merge_output_format": "mp4",
             "no_continue": True,
-            "external_downloader": "aria2c",
-            "external_downloader_args": {
-                "aria2c": [
-                    "-x",
-                    "16",
-                    "-k",
-                    "1M",
-                    "--all-proxy=",
-                ],
-            },
+            "concurrent_fragment_downloads": 16,
             "quiet": False,
             "no_warnings": False,
             "color": "no_color",
@@ -316,12 +307,15 @@ class VideoPipelineDownloader:
         if progress_callback:
             def yt_dlp_progress_hook(d):
                 if d.get("status") == "downloading":
-                    percent_str = d.get("_percent_str", "0.0%").replace("%", "").strip()
-                    try:
-                        percent = float(percent_str)
-                        progress_callback(percent)
-                    except ValueError:
-                        pass
+                    percent_str = str(d.get("_percent_str", "0.0%"))
+                    import re
+                    match = re.search(r'([0-9]+\.[0-9]+)', percent_str)
+                    if match:
+                        try:
+                            percent = float(match.group(1))
+                            progress_callback(percent)
+                        except ValueError:
+                            pass
             ydl_opts["progress_hooks"] = [yt_dlp_progress_hook]
 
         try:

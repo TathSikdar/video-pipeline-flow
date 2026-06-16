@@ -79,6 +79,7 @@ async def queue_worker():
                 request.title,
                 request.description,
                 request.resolution,
+                request.skip_upload,
             )
         except Exception as exc:
             logger.error("Queue worker error: %s", str(exc))
@@ -100,6 +101,7 @@ class PipelineRequest(BaseModel):
     title: str = ""
     description: str = ""
     resolution: str = "1080"
+    skip_upload: bool = False
 
 
 async def _broadcast(
@@ -139,6 +141,7 @@ async def run_pipeline_task(
     title: str,
     description: str,
     resolution: str = "1080",
+    skip_upload: bool = False,
 ) -> None:
     """Background task executing the full download-upload pipeline.
 
@@ -155,40 +158,17 @@ async def run_pipeline_task(
     """
     try:
         # Step 1: Session Generation
-        await _broadcast(
-            "info",
-            "Generating stealth browser session...",
-            video_url=video_url,
-        )
-
         # Step 1: Initialization
         await _broadcast(
             "progress", 
-            "Initializing Headless Browser...", 
+            "Initializing Download Engine...", 
             video_url=video_url, 
-            percent=5.0, 
+            percent=0.0, 
             stage="download"
         )
         
         visitor_data = ""
-        try:
-            session = await generate_session()
-            visitor_data = session.visitor_data
-            
-            await _broadcast(
-                "progress", 
-                "Fetching Proof of Origin Token...", 
-                video_url=video_url, 
-                percent=15.0, 
-                stage="download"
-            )
-        except RuntimeError as exc:
-            await _broadcast(
-                "info",
-                f"Session generation skipped: {exc}. " "Proceeding without PoToken.",
-            )
-
-        # Step 2: Download
+        po_token = None
         await _broadcast(
             "info",
             "Initializing VideoPipelineDownloader...",
@@ -208,11 +188,12 @@ async def run_pipeline_task(
         loop = asyncio.get_event_loop()
 
         def download_progress_cb(percent: float):
-            scaled_percent = 20.0 + round(percent * 0.8, 1)
+            scaled_percent = round(percent, 1)
+            text = "Download Complete" if scaled_percent >= 100.0 else "Downloading Video..."
             asyncio.run_coroutine_threadsafe(
                 _broadcast(
                     "progress",
-                    "Downloading Video Stream...",
+                    text,
                     video_url=video_url,
                     percent=scaled_percent,
                     stage="download",
@@ -238,10 +219,17 @@ async def run_pipeline_task(
             )
             return
 
+        # Move the final MP4 from RAM disk to persistent physical storage early
+        final_filename = os.path.basename(output_path)
+        persistent_path = os.path.join(DOWNLOADS_DIR, final_filename)
+        shutil.move(output_path, persistent_path)
+        output_path = persistent_path
+
         await _broadcast(
-            "info",
+            "download_complete",
             "Download and FFmpeg multiplexing completed.",
             video_url=video_url,
+            local_file=final_filename,
         )
 
         # Step 3: Upload
@@ -255,10 +243,11 @@ async def run_pipeline_task(
         uploader = YouTubeUploader()
 
         def upload_progress_cb(percent: float):
+            text = "Upload Complete" if percent >= 100.0 else "Uploading..."
             asyncio.run_coroutine_threadsafe(
                 _broadcast(
                     "progress",
-                    f"Uploading... {percent}%",
+                    text,
                     video_url=video_url,
                     percent=percent,
                     stage="upload",
@@ -266,26 +255,27 @@ async def run_pipeline_task(
                 loop,
             )
 
-        watch_url = await loop.run_in_executor(
-            None,
-            lambda: uploader.upload_video(
-                file_path=output_path,
-                title=upload_title,
-                description=description,
-                progress_callback=upload_progress_cb,
+        if skip_upload:
+            watch_url = None
+            await _broadcast("info", "Skipping upload phase as requested.", video_url=video_url)
+        else:
+            watch_url = await loop.run_in_executor(
+                None,
+                lambda: uploader.upload_video(
+                    file_path=output_path,
+                    title=upload_title,
+                    description=description,
+                    progress_callback=upload_progress_cb,
+                )
             )
-        )
 
-        if watch_url:
-            # Move the final MP4 from RAM disk to persistent physical storage
-            final_filename = os.path.basename(output_path)
-            persistent_path = os.path.join(DOWNLOADS_DIR, final_filename)
-            shutil.move(output_path, persistent_path)
+        if watch_url or skip_upload:
+            success_msg = "Pipeline complete! Video downloaded (upload skipped)." if skip_upload else "Pipeline complete! Video uploaded as unlisted."
 
             await _broadcast(
                 "success",
-                "Pipeline complete! Video uploaded as unlisted.",
-                url=watch_url,
+                success_msg,
+                url=watch_url or "",
                 local_file=final_filename,
                 video_url=video_url,
             )
@@ -374,12 +364,21 @@ async def health_check() -> dict:
     }
 
 @app.get("/api/download/{filename}")
-async def download_file(filename: str):
+async def download_file(filename: str, title: str = None):
     """Serves the downloaded MP4 file for local saving."""
     file_path = os.path.join(DOWNLOADS_DIR, filename)
     if not os.path.exists(file_path):
         return {"error": "File not found or session expired"}
-    return FileResponse(path=file_path, filename=filename, media_type="video/mp4")
+    
+    download_name = filename
+    if title:
+        import re
+        # Sanitize title to remove invalid filename characters
+        clean_title = re.sub(r'[\\/*?:"<>|]', "", title).strip()
+        if clean_title:
+            download_name = f"{clean_title}.mp4"
+            
+    return FileResponse(path=file_path, filename=download_name, media_type="video/mp4")
 
 
 @app.websocket("/ws/pipeline")
