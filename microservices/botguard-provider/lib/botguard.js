@@ -155,90 +155,67 @@ async function fetchPlayerResponse(videoId) {
  * @throws {Error} If challenge creation or token generation fails.
  */
 export async function generatePoToken(videoId, visitorData) {
-  // Step 1: Fetch the BotGuard challenge metadata
-  const playerResponse = await fetchPlayerResponse(videoId);
-  const botguardData =
-    playerResponse?.attestation?.playerAttestationRenderer?.botguardData;
-
-  if (!botguardData) {
-    console.warn('No botguardData found in player response. Returning null.');
-    return null;
-  }
-
-  const {
-    program: challengeProgram,
-    interpreterSafeUrl,
-    globalName,
-  } = botguardData;
-
-  if (!challengeProgram || !interpreterSafeUrl) {
-    throw new Error(
-      'Incomplete botguardData: missing program or interpreter URL'
-    );
-  }
-
-  // Step 2: Create an isolated browser-like environment
   const dom = createSterileDOM();
 
   try {
-    // Step 3: Fetch the interpreter script and inject it
-    const interpreterUrl = interpreterSafeUrl.startsWith('//')
-      ? `https:${interpreterSafeUrl}`
-      : interpreterSafeUrl;
-
-    const interpreterResponse = await fetch(interpreterUrl, {
-      headers: { 'User-Agent': USER_AGENT },
+    // Step 1: Fetch the BotGuard challenge from the WAA backend API
+    const challengeData = await BG.Challenge.create({
+      requestKey: BOTGUARD_REQUEST_KEY,
+      fetch: globalThis.fetch,
+      useYouTubeAPI: false
     });
 
-    if (!interpreterResponse.ok) {
-      throw new Error(
-        'Failed to fetch BotGuard interpreter: '
-        + `${interpreterResponse.status}`
-      );
+    if (!challengeData || !challengeData.program) {
+      throw new Error('Failed to generate challenge from WAA API.');
     }
 
-    const interpreterCode = await interpreterResponse.text();
+    const {
+      program: challengeProgram,
+      globalName,
+      interpreterJavascript
+    } = challengeData;
+
+    // Step 2: Extract and inject the VM interpreter script
+    let interpreterCode = interpreterJavascript.privateDoNotAccessOrElseSafeScriptWrappedValue;
+
+    if (!interpreterCode) {
+      const safeUrl = interpreterJavascript.privateDoNotAccessOrElseTrustedResourceUrlWrappedValue;
+      if (!safeUrl) {
+        throw new Error('No interpreter script or URL provided by WAA API.');
+      }
+      const interpreterUrl = safeUrl.startsWith('//') ? `https:${safeUrl}` : safeUrl;
+      const interpreterResponse = await fetch(interpreterUrl, {
+        headers: { 'User-Agent': USER_AGENT }
+      });
+      if (!interpreterResponse.ok) {
+        throw new Error(`Failed to fetch BotGuard interpreter: ${interpreterResponse.status}`);
+      }
+      interpreterCode = await interpreterResponse.text();
+    }
+
     const scriptEl = dom.window.document.createElement('script');
     scriptEl.textContent = interpreterCode;
     dom.window.document.head.appendChild(scriptEl);
 
-    // Step 4: Create the BotGuard challenge via bgutils-js
-    const bgChallenge = await BG.Challenge.create({
-      requestKey: BOTGUARD_REQUEST_KEY,
+    // Step 3: Generate the content-bound PoToken
+    const result = await BG.PoToken.generate({
       program: challengeProgram,
       globalName: globalName,
-      bgConfig: {
-        fetch: globalThis.fetch,
-        globalObj: dom.window,
-        identifier: visitorData,
-      },
-    });
-
-    if (!bgChallenge) {
-      throw new Error(
-        'BG.Challenge.create() returned null. '
-        + 'The interpreter may have changed format.'
-      );
-    }
-
-    // Step 5: Generate the content-bound PoToken
-    const poToken = await BG.PoToken.generate({
-      program: challengeProgram,
-      bgConfig: {
-        globalObj: dom.window,
-        fetch: globalThis.fetch,
-      },
-      identifier: visitorData,
       contentBinding: videoId,
+      bgConfig: {
+        globalObj: dom.window,
+        fetch: globalThis.fetch,
+        identifier: visitorData,
+        requestKey: BOTGUARD_REQUEST_KEY
+      }
     });
 
     return {
-      poToken: poToken,
+      poToken: result.poToken,
       visitorData: visitorData,
-      ttlSeconds: 21600, // 6-hour suggested refresh interval
+      ttlSeconds: result.integrityTokenData?.estimatedTtlSecs || 21600,
     };
   } finally {
-    // Always clean up the JSDOM instance to prevent memory leaks
     dom.window.close();
   }
 }

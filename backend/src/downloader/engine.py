@@ -77,9 +77,11 @@ class VideoPipelineDownloader:
             "quiet": True,
             "no_warnings": True,
             "extract_flat": False,
-            "force_ipv6": True,
             "geo_bypass": True,
         }
+        
+        if proxy_url:
+            ydl_opts["proxy"] = proxy_url
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=False)
@@ -137,15 +139,19 @@ class VideoPipelineDownloader:
                     "-j", "16",
                     "-x", "16",
                     "-s", "16",
-                    "-k", "1M"
+                    "-k", "1M",
+                    "--all-proxy=",
+                    "--disable-ipv6=true"
                 ]
             },
             "quiet": False,
             "no_warnings": False,
             "color": "no_color",
-            "force_ipv6": True,
             "geo_bypass": True,
         }
+
+        if proxy_url:
+            ydl_opts["proxy"] = proxy_url
 
         # Inject PoToken as extractor argument
         if po_token:
@@ -285,7 +291,10 @@ class VideoPipelineDownloader:
         po_token = asyncio.run(self._fetch_po_token(video_id, visitor_data or ""))
 
         # Determine video size to decide if we need to chunk
-        info_opts = {"quiet": True, "no_warnings": True, "extract_flat": False, "force_ipv6": True, "geo_bypass": True}
+        info_opts = {"quiet": True, "no_warnings": True, "extract_flat": False, "geo_bypass": True}
+        proxy_url = os.getenv("RESIDENTIAL_PROXY_URL", "")
+        if proxy_url:
+            info_opts["proxy"] = proxy_url
 
         if po_token:
             info_opts.setdefault("extractor_args", {})
