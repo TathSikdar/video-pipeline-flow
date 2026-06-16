@@ -85,6 +85,15 @@ This file contains a historical log of all implementation choices and technical 
 - **Reasoning**: Refresh tokens lock exactly 1 Account to exactly 1 Project. If the user generates `.env` suffix combinations mixing different Projects and Accounts, they shouldn't waste API calls trying combinations where one half is globally exhausted. `CredentialPool` now actively tracks `exhausted_projects` and `exhausted_accounts` sets in-memory. If a task hits `quotaExceeded`, the entire `client_id` is globally banned. If a task hits `uploadLimitExceeded` (Channel Limit) or `invalid_grant` (Dead Token), the entire `refresh_token` (Account) is globally banned. `get_next_credential()` silently skips any banned combinations.
 - **Action**: Refactored Cooldown Expirations from 24h rolling to Midnight PT.
 - **Reasoning**: Standard 24-hour mathematical cooldowns artificially steal throughput if the limit was hit at 11:59 PM PT. Google's actual backend quotas reset precisely at Midnight Pacific Time (3:00 AM EST). The pool now utilizes `zoneinfo.ZoneInfo("America/Los_Angeles")` to actively compare the date of the ban to the current LA date, automatically wiping the banlist the exact second midnight strikes on the West Coast.
+- **Action**: Disabled `geo_bypass` in `yt-dlp` and forced `aria2c` to use IPv4 (`--disable-ipv6=true`).
+- **Reasoning**: The residential HTTP proxy was natively leaking the worker node's IPv4 address via the `X-Forwarded-For` header. Google subsequently locked the stream URL using the `mip=<IPv4>` parameter. Because `aria2c` defaults to IPv6, it suffered a strict IP mismatch (HTTP 403). Forcing `aria2c` to IPv4 mathematically matches the `mip` lock.
+- **Action**: Hardcoded `BOTGUARD_SERVICE_URL` to `http://127.0.0.1:3000` in `engine.py`.
+- **Reasoning**: The backend container operates under `network_mode: "host"`, preventing it from resolving standard Docker internal DNS names (like `botguard-provider:3000`). Routing to localhost bypasses the DNS failure.
+- **Action**: Removed strict `visitorData` validation from the JS microservice.
+- **Reasoning**: The `/generate_pot` endpoint was returning HTTP 400 Bad Request when receiving an empty string for `visitorData`. Removing the strict falsy check allows the creation of unbound PoTokens.
+- **Action**: Corrected `playerAttestationRenderer` JSON extraction path and spoofed `TVHTML5_SIMPLY_EMBEDDED_PLAYER`.
+- **Reasoning**: YouTube recently stopped serving BotGuard payloads in the `/player` response for generic `WEB` clients. By spoofing the Embedded Smart TV client identity, YouTube is forced to serve the BotGuard challenge inline, which is now correctly extracted via the new nested JSON renderer path.
+
 
 ## Performance Benchmarks & Validation
 - **Action**: Validated `aria2c` concurrency override against large payloads (>1.0GB).

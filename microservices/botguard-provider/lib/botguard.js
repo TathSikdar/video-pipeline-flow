@@ -39,8 +39,8 @@ const INNERTUBE_API_KEY = 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8';
  */
 const WEB_CLIENT_CONTEXT = {
   client: {
-    clientName: 'TVHTML5_SIMPLY_EMBEDDED_PLAYER',
-    clientVersion: '2.0',
+    clientName: 'TVHTML5',
+    clientVersion: '7.20230522.00.00',
     hl: 'en',
     gl: 'CA',
   },
