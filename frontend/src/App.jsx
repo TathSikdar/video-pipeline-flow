@@ -53,7 +53,14 @@ function App() {
     }));
   }, []);
 
-  const { messages, isConnected } = useWebSocket('ws://localhost:8000/ws/pipeline', handleWebSocketMessage);
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = import.meta.env.DEV 
+    ? 'ws://localhost:8000/ws/pipeline' 
+    : `${protocol}//${window.location.host}/ws/pipeline`;
+
+  const apiUrl = import.meta.env.DEV ? 'http://localhost:8000/api' : '/api';
+
+  const { messages, isConnected } = useWebSocket(wsUrl, handleWebSocketMessage);
   const [videoUrl, setVideoUrl] = useState('');
   const [title, setTitle] = useState('');
   const [originalTitle, setOriginalTitle] = useState('');
@@ -123,7 +130,7 @@ function App() {
 
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch(`http://localhost:8000/api/video-info?url=${encodeURIComponent(url)}`);
+        const res = await fetch(`${apiUrl}/video-info?url=${encodeURIComponent(url)}`);
         const data = await res.json();
 
         if (data.success && data.resolutions && data.resolutions.length > 0) {
@@ -221,7 +228,7 @@ function App() {
 
     try {
       const response = await fetch(
-        'http://localhost:8000/api/start-pipeline',
+        `${apiUrl}/start-pipeline`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -251,7 +258,7 @@ function App() {
     setTasks(prev => prev.filter(t => t.id !== taskId));
     
     try {
-      await fetch('http://localhost:8000/api/cancel-pipeline', {
+      await fetch(`${apiUrl}/cancel-pipeline`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ task_id: String(taskId) })
