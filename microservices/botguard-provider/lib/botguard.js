@@ -138,7 +138,7 @@ export async function generatePoToken(videoId, visitorData) {
   // Step 1: Fetch the BotGuard challenge metadata
   const playerResponse = await fetchPlayerResponse(videoId);
   const botguardData =
-    playerResponse?.attestation?.botguardData;
+    playerResponse?.attestation?.playerAttestationRenderer?.botguardData;
 
   if (!botguardData) {
     const errorBody = JSON.stringify(playerResponse).substring(0, 500);
