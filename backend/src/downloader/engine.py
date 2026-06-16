@@ -154,11 +154,16 @@ class VideoPipelineDownloader:
         if proxy_url:
             options["proxy"] = proxy_url
 
-        # Inject PoToken as extractor argument
+        # Inject PoToken as extractor argument and force WEB client.
+        # ANDROID_VR ignores PoTokens entirely, so stream URLs are
+        # strictly IP-locked to the proxy. By forcing the WEB client,
+        # the PoToken is injected as a `pot=` URL parameter, which
+        # relaxes IP enforcement on the Google Video Server.
         if po_token:
             options.setdefault("extractor_args", {})
             options["extractor_args"]["youtube"] = [
                 f"po_token=web+{po_token}",
+                "player_client=web",
             ]
 
         # Inject visitor data for session binding
@@ -299,7 +304,10 @@ class VideoPipelineDownloader:
 
         if po_token:
             info_opts.setdefault("extractor_args", {})
-            info_opts["extractor_args"]["youtube"] = [f"po_token=web+{po_token}"]
+            info_opts["extractor_args"]["youtube"] = [
+                f"po_token=web+{po_token}",
+                "player_client=web",
+            ]
         if visitor_data:
             info_opts.setdefault("extractor_args", {})
             info_opts["extractor_args"].setdefault("youtube", []).append(f"visitor_data={visitor_data}")
