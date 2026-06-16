@@ -80,9 +80,6 @@ class VideoPipelineDownloader:
             "geo_bypass": True,
         }
         
-        if proxy_url:
-            ydl_opts["proxy"] = proxy_url
-            
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=False)
             formats = info.get("formats", [])
@@ -123,9 +120,6 @@ class VideoPipelineDownloader:
         Returns:
             A dictionary of yt-dlp configuration options.
         """
-        # Load the residential proxy for metadata extraction
-        proxy_url = os.getenv("RESIDENTIAL_PROXY_URL", "")
-
         options = {
             "outtmpl": os.path.join(self.workspace_dir, "%(id)s.%(ext)s"),
             "format": (
@@ -142,9 +136,7 @@ class VideoPipelineDownloader:
                     "-j", "16",
                     "-x", "16",
                     "-s", "16",
-                    "-k", "1M",
-                    "--disable-ipv6=true",
-                    "--all-proxy="
+                    "-k", "1M"
                 ]
             },
             "quiet": False,
@@ -152,9 +144,6 @@ class VideoPipelineDownloader:
             "color": "no_color",
             "geo_bypass": True,
         }
-
-        if proxy_url:
-            options["proxy"] = proxy_url
 
         # Inject PoToken as extractor argument
         if po_token:
@@ -295,9 +284,6 @@ class VideoPipelineDownloader:
 
         # Determine video size to decide if we need to chunk
         info_opts = {"quiet": True, "no_warnings": True, "extract_flat": False, "geo_bypass": True}
-        proxy_url = os.getenv("RESIDENTIAL_PROXY_URL", "")
-        if proxy_url:
-            info_opts["proxy"] = proxy_url
 
         if po_token:
             info_opts.setdefault("extractor_args", {})

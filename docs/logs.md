@@ -95,6 +95,10 @@ This file contains a historical log of all implementation choices and technical 
 - **Reasoning**: YouTube recently stopped serving BotGuard payloads in the `/player` response for generic `WEB` clients. By spoofing the Embedded Smart TV client identity, YouTube is forced to serve the BotGuard challenge inline, which is now correctly extracted via the new nested JSON renderer path.
 - **Action**: Rewrote `fetchPlayerResponse` to natively scrape the `youtube.com/watch` HTML page instead of querying the InnerTube `/player` API.
 - **Reasoning**: The InnerTube API was aggressively throwing `LOGIN_REQUIRED: Sign in to confirm you’re not a bot` when accessed from the Residential Proxy without a valid `visitorData` or cookie session. By directly fetching the public webpage HTML and extracting the embedded `ytInitialPlayerResponse` JSON natively from the DOM, the microservice perfectly masquerades as an initial browser load, successfully bypassing the API-level bot traps.
+- **Action**: Handled missing BotGuard data for YouTube Shorts gracefully across the pipeline.
+- **Reasoning**: YouTube Shorts are capped at 1080p and do not natively utilize BotGuard attestations in their HTML. The JS microservice was updated to return `null` instead of throwing an error. The Python backend (`engine.py`) was updated to validate the JSON response as a dictionary before invoking `.get()`, eliminating an unhandled `AttributeError` crash on Shorts.
+- **Action**: Re-enabled `geo_bypass=True` in `yt-dlp` to forcefully exploit the IPv4 `mip` lock.
+- **Reasoning**: When `geo_bypass` was disabled, Google exclusively signed the stream URL for the Proxy's IP address, completely rejecting Aria2c's direct connection from the Droplet. By re-enabling `geo_bypass`, yt-dlp forcefully leaks the Droplet's IPv4 via `X-Forwarded-For`. Google reads this leak and permanently binds the stream via the `mip=<IPv4>` parameter. Because Aria2c was forced to use IPv4 (`--disable-ipv6=true`), it flawlessly matches the `mip` lock, enabling high-speed direct downloads that completely bypass the proxy data plane.
 
 
 
