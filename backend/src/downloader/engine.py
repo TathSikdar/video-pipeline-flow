@@ -71,11 +71,17 @@ class VideoPipelineDownloader:
         Returns a dict with 'resolutions' (sorted list) and 'title'.
         Raises an exception if the rapid fetch fails.
         """
+        proxy_url = os.getenv("RESIDENTIAL_PROXY_URL", "")
+        
         ydl_opts = {
             "quiet": True,
             "no_warnings": True,
             "extract_flat": False,
         }
+        
+        if proxy_url:
+            ydl_opts["proxy"] = proxy_url
+            
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=False)
             formats = info.get("formats", [])
@@ -277,6 +283,10 @@ class VideoPipelineDownloader:
 
         # Determine video size to decide if we need to chunk
         info_opts = {"quiet": True, "no_warnings": True, "extract_flat": False}
+        proxy_url = os.getenv("RESIDENTIAL_PROXY_URL", "")
+        if proxy_url:
+            info_opts["proxy"] = proxy_url
+
         if po_token:
             info_opts.setdefault("extractor_args", {})
             info_opts["extractor_args"]["youtube"] = [f"po_token=web+{po_token}"]
