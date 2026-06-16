@@ -203,14 +203,15 @@ class VideoPipelineDownloader:
                 response.raise_for_status()
 
                 data = response.json()
-                po_token = data.get("poToken")
-
-                if po_token:
-                    logger.info(
-                        "PoToken generated: %s...",
-                        po_token[:15],
-                    )
-                return po_token
+                if data and isinstance(data, dict):
+                    po_token = data.get("poToken")
+                    if po_token:
+                        logger.info(
+                            "PoToken generated: %s...",
+                            po_token[:15],
+                        )
+                    return po_token
+                return None
 
         except httpx.HTTPError as exc:
             logger.error(
