@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 # BotGuard microservice URL (internal Docker network)
 BOTGUARD_SERVICE_URL = os.getenv(
     "BOTGUARD_SERVICE_URL",
-    "http://botguard-provider:3000",
+    "http://127.0.0.1:3000",
 )
 
 # Timeout for BotGuard microservice requests (seconds)
