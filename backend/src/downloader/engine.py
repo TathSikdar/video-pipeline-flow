@@ -77,6 +77,7 @@ class VideoPipelineDownloader:
             "quiet": True,
             "no_warnings": True,
             "extract_flat": False,
+            "force_ipv6": True,
             "geo_bypass": True,
         }
         
@@ -142,6 +143,7 @@ class VideoPipelineDownloader:
             "quiet": False,
             "no_warnings": False,
             "color": "no_color",
+            "force_ipv6": True,
             "geo_bypass": True,
         }
 
@@ -283,7 +285,7 @@ class VideoPipelineDownloader:
         po_token = asyncio.run(self._fetch_po_token(video_id, visitor_data or ""))
 
         # Determine video size to decide if we need to chunk
-        info_opts = {"quiet": True, "no_warnings": True, "extract_flat": False, "geo_bypass": True}
+        info_opts = {"quiet": True, "no_warnings": True, "extract_flat": False, "force_ipv6": True, "geo_bypass": True}
 
         if po_token:
             info_opts.setdefault("extractor_args", {})
