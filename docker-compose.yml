@@ -28,8 +28,8 @@ services:
     environment:
       - WORKSPACE_DIR=/dev/shm
     # Crucial setting for local testing: Docker defaults to 64MB for /dev/shm.
-    # 4GB ensures enough space for concurrent video processing.
-    shm_size: '4gb'
+    # 2.5GB reflects the server constraint.
+    shm_size: '2.5gb'
     volumes:
       - ./backend:/app
     command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload

@@ -175,7 +175,7 @@ async def run_pipeline_task(
             video_url=video_url,
         )
 
-        engine = VideoPipelineDownloader(WORKSPACE_DIR)
+        engine = VideoPipelineDownloader(WORKSPACE_DIR, DOWNLOADS_DIR)
 
         await _broadcast(
             "info",
@@ -219,11 +219,8 @@ async def run_pipeline_task(
             )
             return
 
-        # Move the final MP4 from RAM disk to persistent physical storage early
+        # The engine moves the final MP4 from RAM disk to persistent physical storage directly.
         final_filename = os.path.basename(output_path)
-        persistent_path = os.path.join(DOWNLOADS_DIR, final_filename)
-        shutil.move(output_path, persistent_path)
-        output_path = persistent_path
 
         await _broadcast(
             "download_complete",

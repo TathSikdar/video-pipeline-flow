@@ -82,6 +82,10 @@ function App() {
     if (!lastMessage || !lastMessage.video_url) return;
 
     setTasks(prev => prev.map(task => {
+      if (task.status === 'completed' || task.status === 'error') {
+        return task;
+      }
+
       if (task.url === lastMessage.video_url) {
         let updated = { ...task };
         if (lastMessage.type === 'progress') {
@@ -192,7 +196,10 @@ function App() {
         addToQueue={addToQueue}
       />
 
-      <TaskQueue tasks={tasks} />
+      <div className="flex flex-col gap-12">
+        <TaskQueue tasks={tasks.filter(t => t.status === 'completed' || t.status === 'error')} title="Completed" />
+        <TaskQueue tasks={tasks.filter(t => t.status !== 'completed' && t.status !== 'error')} title="Queue" />
+      </div>
     </div>
   );
 }

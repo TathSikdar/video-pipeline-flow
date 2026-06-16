@@ -50,14 +50,17 @@ class VideoPipelineDownloader:
         sabr_adapter: The SABR backoff suppression adapter.
     """
 
-    def __init__(self, workspace_dir: str) -> None:
+    def __init__(self, workspace_dir: str, persistent_dir: str = "/tmp") -> None:
         """Initializes the downloader with a workspace directory.
 
         Args:
             workspace_dir: Absolute path to the tmpfs workspace
                 where downloads and multiplexing occur.
+            persistent_dir: Absolute path to the HDD storage
+                where chunks and final videos are kept.
         """
         self.workspace_dir = workspace_dir
+        self.persistent_dir = persistent_dir
         self.sabr_processor = SabrUmpProcessor()
         self.sabr_adapter = SabrStreamingAdapter(self.sabr_processor)
 
@@ -257,31 +260,6 @@ class VideoPipelineDownloader:
         progress_callback=None,
         resolution: str = "1080",
     ) -> Optional[str]:
-        """Executes the Strict Synchronous Lifecycle.
-
-        1. Garbage collect lingering fragments.
-        2. Generate a fresh PoToken via BotGuard microservice.
-        3. Download video + audio with yt-dlp + aria2c.
-        4. Block until FFmpeg multiplexing completes.
-        5. Return the output file path for upload.
-
-        The lifecycle strictly caps RAM usage to exactly one
-        video at a time, ensuring we never exceed the 4GB
-        tmpfs partition.
-
-        Args:
-            video_url: The YouTube video URL to process.
-            visitor_data: The visitor data string for BotGuard
-                token binding. Empty string if not available.
-
-        Returns:
-            The absolute path to the final multiplexed MP4 file,
-            or None if the download fails.
-
-        Raises:
-            yt_dlp.utils.DownloadError: If yt-dlp encounters a
-                fatal download error.
-        """
         video_id = self._extract_video_id(video_url)
         logger.info(
             "Starting Strict Synchronous Lifecycle for %s (%s)",
@@ -297,13 +275,63 @@ class VideoPipelineDownloader:
         if visitor_data:
             po_token = asyncio.run(self._fetch_po_token(video_id, visitor_data))
 
-        # Step 3 & 4: Download + Multiplex (Blocking)
+        # Determine video size to decide if we need to chunk
+        info_opts = {"quiet": True, "no_warnings": True, "extract_flat": False}
+        if po_token:
+            info_opts.setdefault("extractor_args", {})
+            info_opts["extractor_args"]["youtube"] = [f"po_token=web+{po_token}"]
+        if visitor_data:
+            info_opts.setdefault("extractor_args", {})
+            info_opts["extractor_args"].setdefault("youtube", []).append(f"visitor_data={visitor_data}")
+
+        try:
+            with yt_dlp.YoutubeDL(info_opts) as ydl:
+                info = ydl.extract_info(video_url, download=False)
+        except Exception as exc:
+            logger.error("Failed to extract info for chunking check: %s", str(exc))
+            raise
+
+        duration = info.get("duration", 0)
+        
+        # Calculate total filesize
+        filesize = 0
+        if "requested_formats" in info:
+            for f in info["requested_formats"]:
+                filesize += f.get("filesize") or f.get("filesize_approx") or 0
+        else:
+            filesize = info.get("filesize") or info.get("filesize_approx") or 0
+            
+        if filesize == 0 and duration > 0:
+            # Fallback estimation for 1080p: ~50MB per minute = ~833 KB/sec
+            filesize = duration * 833333
+
+        # Threshold: 1.0 GB
+        # Rationale: During FFmpeg multiplexing, the RAM disk holds both the raw 
+        # video/audio streams AND the newly generated final file simultaneously.
+        # A 1.0GB video requires ~2.0GB of space at peak. This leaves a 500MB buffer 
+        # for a 2.5GB RAM disk.
+        THRESHOLD_BYTES = 1.0 * 1024 * 1024 * 1024
+        
         ydl_opts = self._get_ytdlp_options(
             po_token=po_token,
             visitor_data=visitor_data,
             resolution=resolution,
         )
 
+        try:
+            if filesize > THRESHOLD_BYTES and duration > 0:
+                logger.info("Video size %.2f GB exceeds 1.0GB threshold. Bypassing RAM disk and downloading directly to HDD.", filesize / (1024**3))
+                ydl_opts["outtmpl"] = os.path.join(self.persistent_dir, "%(id)s.%(ext)s")
+                return self._process_single_shot(video_id, video_url, ydl_opts, progress_callback, direct_to_hdd=True)
+            else:
+                logger.info("Video size %.2f GB under threshold. Triggering standard RAM disk workflow.", filesize / (1024**3))
+                return self._process_single_shot(video_id, video_url, ydl_opts, progress_callback, direct_to_hdd=False)
+        except Exception as exc:
+            logger.error("Unexpected error during download of %s: %s", video_id, str(exc))
+            purge_workspace(self.workspace_dir)
+            raise
+
+    def _process_single_shot(self, video_id, video_url, ydl_opts, progress_callback, direct_to_hdd=False):
         if progress_callback:
             def yt_dlp_progress_hook(d):
                 if d.get("status") == "downloading":
@@ -320,36 +348,36 @@ class VideoPipelineDownloader:
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                logger.info("Starting yt-dlp download and " "FFmpeg multiplexing...")
+                logger.info("Starting yt-dlp download and FFmpeg multiplexing...")
                 ydl.download([video_url])
                 logger.info("yt-dlp and FFmpeg completed successfully.")
-
         except yt_dlp.utils.DownloadError as exc:
-            logger.error(
-                "Download failed for %s: %s",
-                video_id,
-                str(exc),
-            )
-            purge_workspace(self.workspace_dir)
+            logger.error("Download failed for %s: %s", video_id, str(exc))
+            if not direct_to_hdd:
+                purge_workspace(self.workspace_dir)
             raise
 
-        except Exception as exc:
-            logger.error(
-                "Unexpected error during download of %s: %s",
-                video_id,
-                str(exc),
-            )
-            purge_workspace(self.workspace_dir)
-            raise
+        # Locate the output file in the correct directory
+        search_dir = self.persistent_dir if direct_to_hdd else self.workspace_dir
+        import glob
+        pattern = os.path.join(search_dir, f"{video_id}.*")
+        matches = glob.glob(pattern)
+        output_path = None
+        for match in matches:
+            if not match.endswith((".part", ".ytdl")):
+                output_path = match
+                break
 
-        # Step 5: Locate the output file
-        output_path = self._find_output_file(video_id)
         if output_path:
             logger.info("Output file ready: %s", output_path)
+            if not direct_to_hdd:
+                # Move to persistent directly from here
+                final_filename = os.path.basename(output_path)
+                import shutil
+                persistent_path = os.path.join(self.persistent_dir, final_filename)
+                shutil.move(output_path, persistent_path)
+                return persistent_path
+            return output_path
         else:
-            logger.error(
-                "Output file not found for %s after " "successful download.",
-                video_id,
-            )
-
-        return output_path
+            logger.error("Output file not found for %s after successful download.", video_id)
+            return None
