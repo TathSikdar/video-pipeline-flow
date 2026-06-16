@@ -42,7 +42,7 @@ const WEB_CLIENT_CONTEXT = {
     clientName: 'WEB',
     clientVersion: '2.20250101.00.00',
     hl: 'en',
-    gl: 'US',
+    gl: 'CA',
   },
 };
 
@@ -141,9 +141,10 @@ export async function generatePoToken(videoId, visitorData) {
     playerResponse?.attestation?.botguardData;
 
   if (!botguardData) {
+    const errorBody = JSON.stringify(playerResponse).substring(0, 500);
     throw new Error(
       'No botguardData found in player response. '
-      + 'The video may be unavailable or the API format changed.'
+      + 'Response: ' + errorBody
     );
   }
 
