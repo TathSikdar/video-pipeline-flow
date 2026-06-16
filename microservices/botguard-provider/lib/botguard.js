@@ -157,6 +157,12 @@ async function fetchPlayerResponse(videoId) {
 export async function generatePoToken(videoId, visitorData) {
   const dom = createSterileDOM();
 
+  // Patch JSDOM's Function constructor to match Node.js's.
+  // The BotGuard VM creates functions inside the JSDOM realm.
+  // bgutils-js checks `mintCallback instanceof Function` using
+  // Node.js's Function, which fails for cross-realm objects.
+  dom.window.Function = Function;
+
   try {
     // Step 1: Fetch the BotGuard challenge from the WAA backend API
     const challengeData = await BG.Challenge.create({
@@ -206,7 +212,8 @@ export async function generatePoToken(videoId, visitorData) {
         globalObj: dom.window,
         fetch: globalThis.fetch,
         identifier: visitorData,
-        requestKey: BOTGUARD_REQUEST_KEY
+        requestKey: BOTGUARD_REQUEST_KEY,
+        useYouTubeAPI: true
       }
     });
 
