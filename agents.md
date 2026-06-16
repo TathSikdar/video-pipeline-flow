@@ -41,4 +41,4 @@ When coding or refactoring files in this repository, all AI agents must follow t
 3.  **Perform Minimal Diffs:** Avoid restructuring whole files if only a few lines need changes. Targeted updates minimize the risk of regression and speed up reviews.
 4.  **No Placeholders:** Never submit stub methods or placeholder comments like `// TODO: Implement later` unless explicitly requested. Every path must be fully implemented, documented, and tested.
 5.  **Context Ingestion:** Agents must read these reference files to ingest context before generating architecture blueprints or code files.
-6.  **Documentation Rule:** All implementation choices (e.g., rotating IP system setup) must be recorded in `logs.md`. Entry must include exact step taken and technical reasoning in succinct format.
+6.  **Documentation Rule:** All implementation choices (e.g., rotating IP system setup) must be recorded in `docs/logs.md`. Entry must include exact step taken and technical reasoning in succinct format.

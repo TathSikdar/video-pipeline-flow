@@ -7,9 +7,7 @@
  * streams.
  *
  * This module wraps the bgutils-js library which provides the
- * reverse-engineered BotGuard VM interpreter. Using this library
- * is the production-standard approach taken by projects like
- * bgutil-ytdlp-pot-provider.
+ * reverse-engineered BotGuard VM interpreter.
  *
  * @see https://github.com/AntimatterCoder/BotGuard
  */

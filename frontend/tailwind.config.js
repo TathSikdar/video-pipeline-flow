@@ -11,7 +11,7 @@ export default {
       },
       animation: {
         'gradient-x': 'gradient-x 3s ease infinite',
-        'fade-in-up': 'fadeInUp 0.5s ease-out forwards',
+        'fade-in-up': 'fadeInUp 0.5s ease-out both',
       },
       keyframes: {
         'gradient-x': {
