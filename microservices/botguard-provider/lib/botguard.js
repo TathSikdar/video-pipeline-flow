@@ -162,7 +162,7 @@ export async function generatePoToken(videoId, visitorData) {
     const challengeData = await BG.Challenge.create({
       requestKey: BOTGUARD_REQUEST_KEY,
       fetch: globalThis.fetch,
-      useYouTubeAPI: false
+      useYouTubeAPI: true
     });
 
     if (!challengeData || !challengeData.program) {

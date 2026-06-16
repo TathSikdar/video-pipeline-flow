@@ -150,8 +150,9 @@ class VideoPipelineDownloader:
             "geo_bypass": True,
         }
 
+        proxy_url = os.getenv("RESIDENTIAL_PROXY_URL", "")
         if proxy_url:
-            ydl_opts["proxy"] = proxy_url
+            options["proxy"] = proxy_url
 
         # Inject PoToken as extractor argument
         if po_token:
