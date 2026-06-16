@@ -1,0 +1,6 @@
+FROM alpine:latest
+RUN apk add --no-cache bash iproute2 grep
+WORKDIR /app
+COPY rotate_ipv6.sh .
+RUN chmod +x rotate_ipv6.sh
+CMD ["./rotate_ipv6.sh"]

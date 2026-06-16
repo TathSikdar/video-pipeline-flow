@@ -135,7 +135,8 @@ The analysis doc strictly dictates that we must route BotGuard challenges and In
 
 ### Problem 6.2: Automated IPv6 Rotation (Environment Constraints)
 Native SLAAC and cronjob IP assignments are frequently blocked by cloud hosts (like Render) due to missing kernel privileges. Since Cloudflare WARP IPs are highly cataloged by Google, and public APIs are too slow, we must move off PaaS.
-*   **[SELECTED] Solution E (Dedicated VPS Root Routing):** We abandon PaaS hosts like Render and deploy the stack to a standard $5 Dedicated Virtual Private Server (VPS) via Hetzner or DigitalOcean. Because we have root access to the host kernel, we can safely execute the `rotate_ipv6.sh` cronjob directly on the host machine every 30 minutes, dynamically binding random IPs from our assigned `/64` block to the egress network interface.
+*   **[SELECTED] Solution F (Docker Sidecar Container):** We deploy the stack to a standard Dedicated Virtual Private Server (VPS) via DigitalOcean. Instead of manually configuring root cronjobs on the host, we execute a zero-config Docker sidecar container (`ipv6-rotator`). By using `network_mode: "host"` and granting `NET_ADMIN` capabilities, this container automatically detects the VPS's assigned `/64` IPv6 prefix and silently generates and binds a new random IPv6 address to the host network interface every 30 minutes. This makes the entire architecture fully portable and deployable with a single `docker compose up` command.
+*   ~~Solution E (Dedicated VPS Root Routing):~~ Manually configuring root cronjobs on the host machine. (Prone to human error during setup).
 
 ### Problem 6.3: Infrastructure as Code (VPS Topology)
 Since we are no longer using Render, we need a way to deploy this entire architecture to a raw Linux server securely.
