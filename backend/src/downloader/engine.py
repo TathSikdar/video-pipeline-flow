@@ -134,7 +134,17 @@ class VideoPipelineDownloader:
             ),
             "merge_output_format": "mp4",
             "no_continue": True,
-            "concurrent_fragment_downloads": 16,
+            "external_downloader": "aria2c",
+            "external_downloader_args": {
+                "aria2c": [
+                    "-c",
+                    "-j", "16",
+                    "-x", "16",
+                    "-s", "16",
+                    "-k", "1M",
+                    "--all-proxy="
+                ]
+            },
             "quiet": False,
             "no_warnings": False,
             "color": "no_color",
