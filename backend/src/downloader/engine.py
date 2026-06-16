@@ -139,9 +139,7 @@ class VideoPipelineDownloader:
                     "-j", "16",
                     "-x", "16",
                     "-s", "16",
-                    "-k", "1M",
-                    "--all-proxy=",
-                    "--disable-ipv6=true"
+                    "-k", "1M"
                 ]
             },
             "quiet": False,
