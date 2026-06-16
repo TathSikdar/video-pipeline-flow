@@ -18,6 +18,7 @@ export function TaskItem({ task, pulse, onRemove }) {
   };
 
   const videoId = extractVideoId(task.url);
+  const apiUrl = import.meta.env.DEV ? 'http://localhost:8000/api' : '/api';
 
   return (
     <div className="animate-fade-in-up">
@@ -69,7 +70,7 @@ export function TaskItem({ task, pulse, onRemove }) {
                     <div className="flex items-center justify-between p-3 rounded-lg bg-gray-900/40 border border-gray-700/50 group hover:border-gray-600 transition-colors animate-fade-in-up">
                       <span className="text-gray-300 text-sm truncate mr-4">Ready for Download</span>
                       <a
-                        href={`http://localhost:8000/api/download/${task.localFile}?title=${encodeURIComponent(task.title || '')}`}
+                        href={`${apiUrl}/download/${task.localFile}?title=${encodeURIComponent(task.title || '')}`}
                         download
                         className="text-cyan-400 text-sm font-medium hover:text-cyan-300 whitespace-nowrap"
                       >
