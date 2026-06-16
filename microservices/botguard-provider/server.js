@@ -10,6 +10,7 @@
  */
 
 import express from 'express';
+import { ProxyAgent, setGlobalDispatcher } from 'undici';
 import { generatePoToken } from './lib/botguard.js';
 import {
   decryptSignature,
@@ -19,6 +20,16 @@ import {
 
 /** @const {number} Server listening port. */
 const PORT = process.env.PORT || 3000;
+
+// Setup Global Proxy for native fetch()
+const PROXY_URL = process.env.RESIDENTIAL_PROXY_URL;
+if (PROXY_URL) {
+  const proxyAgent = new ProxyAgent(PROXY_URL);
+  setGlobalDispatcher(proxyAgent);
+  console.log(`[Proxy] Global undici dispatcher set to: ${PROXY_URL}`);
+} else {
+  console.log('[Proxy] No RESIDENTIAL_PROXY_URL found. Running directly on host IP.');
+}
 
 const app = express();
 app.use(express.json());
