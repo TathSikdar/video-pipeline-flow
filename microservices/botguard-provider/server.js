@@ -67,9 +67,9 @@ app.get('/health', (_req, res) => {
 app.post('/generate_pot', async (req, res) => {
   const { videoId, visitorData } = req.body;
 
-  if (!videoId || !visitorData) {
+  if (!videoId) {
     return res.status(400).json({
-      error: 'Missing required fields: videoId, visitorData',
+      error: 'Missing required fields: videoId',
     });
   }
 
