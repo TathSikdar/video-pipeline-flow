@@ -86,9 +86,29 @@ function createSterileDOM() {
  * @throws {Error} If the InnerTube request fails.
  */
 async function fetchPlayerResponse(videoId) {
-  const url = `${INNERTUBE_BASE}/player?key=${INNERTUBE_API_KEY}`;
-
+  const url = `https://www.youtube.com/watch?v=${videoId}`;
   const response = await fetch(url, {
+    headers: {
+      'User-Agent': USER_AGENT,
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    },
+  });
+  const html = await response.text();
+  
+  // Extract ytInitialPlayerResponse from the HTML script tags
+  const match = html.match(/ytInitialPlayerResponse\s*=\s*({.+?});var/);
+  if (match && match[1]) {
+    try {
+      return JSON.parse(match[1]);
+    } catch (e) {
+      console.error("Failed to parse ytInitialPlayerResponse JSON");
+    }
+  }
+
+  // Fallback to InnerTube API if regex extraction fails
+  const apiUrl = `${INNERTUBE_BASE}/player?key=${INNERTUBE_API_KEY}`;
+  const apiResponse = await fetch(apiUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -100,13 +120,13 @@ async function fetchPlayerResponse(videoId) {
     }),
   });
 
-  if (!response.ok) {
+  if (!apiResponse.ok) {
     throw new Error(
-      `InnerTube player request failed: ${response.status}`
+      `InnerTube player request failed: ${apiResponse.status}`
     );
   }
 
-  return response.json();
+  return apiResponse.json();
 }
 
 /**
