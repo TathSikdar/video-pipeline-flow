@@ -69,14 +69,15 @@ class YouTubeUploader:
         )
 
         import httplib2
+        import google_auth_httplib2
         http = httplib2.Http(timeout=300)
+        authed_http = google_auth_httplib2.AuthorizedHttp(credentials, http=http)
 
         return build(
             "youtube",
             "v3",
-            credentials=credentials,
             cache_discovery=False,
-            http=http
+            http=authed_http
         )
 
     def upload_video(
