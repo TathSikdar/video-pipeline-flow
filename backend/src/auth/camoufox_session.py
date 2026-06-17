@@ -115,10 +115,16 @@ async def generate_session() -> SessionData:
         )
 
         try:
-            async with AsyncCamoufox(
-                headless=True,
-                geoip=True,
-            ) as browser:
+            import os
+            proxy_url = os.getenv("RESIDENTIAL_PROXY_URL", "")
+            camoufox_args = {
+                "headless": True,
+                "geoip": True,
+            }
+            if proxy_url:
+                camoufox_args["proxy"] = {"server": proxy_url}
+
+            async with AsyncCamoufox(**camoufox_args) as browser:
                 context = await browser.new_context(
                     viewport={
                         "width": VIEWPORT_WIDTH,
