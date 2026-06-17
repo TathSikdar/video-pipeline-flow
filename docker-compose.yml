@@ -5,8 +5,7 @@ services:
     build:
       context: ./microservices/botguard-provider
     container_name: video-pipeline-botguard
-    ports:
-      - "3000:3000"
+    network_mode: "host"
     env_file:
       - ./backend/.env
 

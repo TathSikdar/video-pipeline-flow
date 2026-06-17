@@ -20,6 +20,15 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
+# Force IPv4 globally in this process to prevent httplib2 from hanging 
+# on DigitalOcean's broken/unconfigured IPv6 stack when contacting googleapis.com
+import socket
+old_getaddrinfo = socket.getaddrinfo
+def new_getaddrinfo(*args, **kwargs):
+    responses = old_getaddrinfo(*args, **kwargs)
+    return [res for res in responses if res[0] == socket.AF_INET]
+socket.getaddrinfo = new_getaddrinfo
+
 logger = logging.getLogger(__name__)
 
 # GCP token URI
@@ -59,11 +68,15 @@ class YouTubeUploader:
             client_secret=client_secret,
         )
 
+        import httplib2
+        http = httplib2.Http(timeout=300)
+
         return build(
             "youtube",
             "v3",
             credentials=credentials,
             cache_discovery=False,
+            http=http
         )
 
     def upload_video(
