@@ -35,8 +35,8 @@ The backend will require sensitive proxy credentials, OAuth2 refresh token pools
 
 ### Problem 2.1: Download Concurrency & Throttling Evasion
 YouTube throttles single HTTP connections. The pipeline analysis requires forcing fragment concurrency to bypass these limits.
-*   **[SELECTED] Solution A (External `aria2c`):** Integrate `aria2c` as the external downloader for `yt-dlp`, establishing 16 concurrent TCP byte-range connections (`-x 16 -k 1M`). This is highly robust but requires installing `aria2c` in our Docker container.
-*   ~~Solution B (Native `yt-dlp` Concurrency):~~ Utilize `yt-dlp`'s built-in `--concurrent-fragments` flag. It requires no external dependencies but can sometimes fail to maintain persistent connections compared to `aria2c`.
+*   ~~Solution A (External `aria2c`):~~ Integrate `aria2c` as the external downloader. This was abandoned because `aria2c` lacks native SOCKS5 proxy integration when spawned via `yt-dlp`, breaking the signature mismatch lock required for Cloudflare WARP.
+*   **[SELECTED] Solution B (Native `yt-dlp` Concurrency):** Utilize `yt-dlp`'s built-in `--concurrent-fragments 16` flag. It seamlessly inherits the SOCKS5 proxy environment, perfectly matching the extraction IP to the download IP, and entirely avoiding HTTP 403 Signature Mismatches without external dependencies.
 
 ### Problem 2.2: Universal Media Protocol (UMP) & SABR Handling
 YouTube enforces the SABR protocol, which drops resolution to 360p for non-compliant clients and obfuscates stream data inside UMP blobs.
@@ -133,10 +133,16 @@ The analysis doc strictly dictates that we must route BotGuard challenges and In
 *   **[SELECTED] Solution A (Dynamic `yt-dlp` Injection):** Configure the Python backend to pass a residential proxy URL specifically for the initial `yt-dlp` metadata extraction phase. However, when handing the raw stream URL over to `aria2c` for the heavy binary download, we instruct `aria2c` to bypass the proxy and use the server's default IPv6 address.
 *   ~~Solution B (Global OS Proxy):~~ Route the entire Docker container through a residential proxy. (This violates the requirements and would cost roughly $60 per 4K download).
 
-### Problem 6.2: Automated IPv6 Rotation (Environment Constraints)
-Native SLAAC and cronjob IP assignments are frequently blocked by cloud hosts (like Render) due to missing kernel privileges. Since Cloudflare WARP IPs are highly cataloged by Google, and public APIs are too slow, we must move off PaaS.
-*   **[SELECTED] Solution F (Docker Sidecar Container):** We deploy the stack to a standard Dedicated Virtual Private Server (VPS) via DigitalOcean. Instead of manually configuring root cronjobs on the host, we execute a zero-config Docker sidecar container (`ipv6-rotator`). By using `network_mode: "host"` and granting `NET_ADMIN` capabilities, this container automatically detects the VPS's assigned `/64` IPv6 prefix and silently generates and binds a new random IPv6 address to the host network interface every 30 minutes. This makes the entire architecture fully portable and deployable with a single `docker compose up` command.
+### Problem 6.2: Automated IPv6 Rotation & Proxy Bypassing
+Cloudflare WARP IPs are highly trusted, but datacenter IPs are instantly blocked. 
+*   **[SELECTED] Solution G (Cloudflare WARP SOCKS5 Proxy):** We abandoned the complex rotating IPv6 sidecar and paid residential proxies. Instead, we installed the Cloudflare `warp-cli` directly on the Droplet host and configured it in local proxy mode (`socks5://127.0.0.1:40000`). This grants the entire pipeline a free, high-trust, residential-like egress point that perfectly bypasses YouTube's Datacenter/Bot blocks without sacrificing bandwidth.
+*   ~~Solution F (Docker Sidecar Container):~~ Run an `ipv6-rotator` container with `NET_ADMIN`. (Abandoned due to unreliability and complexity compared to Cloudflare WARP).
 *   ~~Solution E (Dedicated VPS Root Routing):~~ Manually configuring root cronjobs on the host machine. (Prone to human error during setup).
+
+### Problem 6.4: Search Engine Visibility & Security
+The pipeline tool must remain completely private to the owner and must never be indexed by Google or other search crawlers.
+*   **[SELECTED] Solution A (Nginx X-Robots-Tag + robots.txt):** Inject the `X-Robots-Tag: noindex, nofollow, nosnippet, noarchive` HTTP header directly into the Nginx reverse proxy configuration, and serve a wildcard `robots.txt`. This strictly enforces privacy at the network level, preventing crawlers from ever logging the UI or API endpoints.
+*   ~~Solution B (Password Authentication):~~ Add HTTP Basic Auth or a login screen. (Creates unnecessary friction for a private utility tool).
 
 ### Problem 6.3: Infrastructure as Code (VPS Topology)
 Since we are no longer using Render, we need a way to deploy this entire architecture to a raw Linux server securely.
