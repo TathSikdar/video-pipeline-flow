@@ -105,6 +105,7 @@ class VideoPipelineDownloader:
         self,
         po_token: Optional[str] = None,
         visitor_data: Optional[str] = None,
+        visitor_cookie: Optional[str] = None,
         resolution: str = "1080",
     ) -> dict:
         """Configures yt-dlp with aria2c and authentication params.
@@ -160,6 +161,10 @@ class VideoPipelineDownloader:
             options.setdefault("extractor_args", {})
             yt_args = options["extractor_args"].setdefault("youtube", [])
             yt_args.append(f"visitor_data={visitor_data}")
+
+        if visitor_cookie:
+            options.setdefault("http_headers", {})
+            options["http_headers"]["Cookie"] = f"VISITOR_INFO1_LIVE={visitor_cookie};"
 
         return options
 
@@ -269,6 +274,7 @@ class VideoPipelineDownloader:
         self,
         video_url: str,
         visitor_data: str = "",
+        visitor_cookie: str = "",
         progress_callback=None,
         resolution: str = "1080",
     ) -> Optional[str]:
@@ -300,6 +306,9 @@ class VideoPipelineDownloader:
         if visitor_data:
             info_opts.setdefault("extractor_args", {})
             info_opts["extractor_args"].setdefault("youtube", []).append(f"visitor_data={visitor_data}")
+        if visitor_cookie:
+            info_opts.setdefault("http_headers", {})
+            info_opts["http_headers"]["Cookie"] = f"VISITOR_INFO1_LIVE={visitor_cookie};"
 
         try:
             with yt_dlp.YoutubeDL(info_opts) as ydl:
@@ -332,6 +341,7 @@ class VideoPipelineDownloader:
         ydl_opts = self._get_ytdlp_options(
             po_token=po_token,
             visitor_data=visitor_data,
+            visitor_cookie=visitor_cookie,
             resolution=resolution,
         )
 
