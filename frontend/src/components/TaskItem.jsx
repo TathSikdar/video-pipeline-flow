@@ -104,14 +104,14 @@ export function TaskItem({ task, pulse, onRemove }) {
                         Open &rarr;
                       </a>
                     </div>
-                  ) : (
+                  ) : task.status !== 'error' ? (
                     <div className="flex items-center p-3 rounded-lg bg-gray-900/40 border border-gray-700/50 animate-fade-in-up">
                       <span className="text-gray-500 text-sm italic truncate flex items-center gap-3">
                         <div className="w-4 h-4 border-2 border-gray-600/30 border-t-gray-500 rounded-full animate-spin"></div>
                         Processing Reupload Link...
                       </span>
                     </div>
-                  )
+                  ) : null
                 )}
               </div>
             )}

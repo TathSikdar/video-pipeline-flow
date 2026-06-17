@@ -21,7 +21,7 @@ export function InputForm({
 }) {
   return (
     <div className="glass-card p-8 mb-8 animate-fade-in-up" style={{ animationDelay: '0.1s' }}>
-      <div className="mb-6 space-y-4">
+      <div className="mb-6 space-y-4 relative z-20">
         <div>
           <label htmlFor="video-url-input" className="block text-sm font-medium text-gray-300 mb-2">
             YouTube URL

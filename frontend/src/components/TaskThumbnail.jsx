@@ -1,4 +1,5 @@
 export function TaskThumbnail({ task, videoId }) {
+  const apiUrl = import.meta.env.DEV ? 'http://localhost:8000/api' : '/api';
   const isCompleted = task.status === 'completed' || task.localFile;
 
   const content = (
@@ -25,7 +26,7 @@ export function TaskThumbnail({ task, videoId }) {
   if (isCompleted) {
     return (
       <a
-        href={`http://localhost:8000/api/download/${task.localFile}?title=${encodeURIComponent(task.title || 'TransferTube Video')}`}
+        href={`${apiUrl}/download/${task.localFile}?title=${encodeURIComponent(task.title || 'TransferTube Video')}`}
         download={`${task.title || 'TransferTube Video'}.mp4`}
         className={`${containerClasses} cursor-pointer`}
       >
@@ -37,9 +38,11 @@ export function TaskThumbnail({ task, videoId }) {
   return (
     <div className={containerClasses}>
       {content}
-      <div className="absolute inset-0 flex items-center justify-center">
-        <div className="w-8 h-8 border-4 border-cyan-500/30 border-t-cyan-500 rounded-full animate-spin"></div>
-      </div>
+      {task.status !== 'error' && (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="w-8 h-8 border-4 border-cyan-500/30 border-t-cyan-500 rounded-full animate-spin"></div>
+        </div>
+      )}
     </div>
   );
 }
