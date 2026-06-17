@@ -28,6 +28,7 @@ def new_getaddrinfo(*args, **kwargs):
     responses = old_getaddrinfo(*args, **kwargs)
     return [res for res in responses if res[0] == socket.AF_INET]
 socket.getaddrinfo = new_getaddrinfo
+socket.setdefaulttimeout(300)
 
 logger = logging.getLogger(__name__)
 
@@ -68,16 +69,11 @@ class YouTubeUploader:
             client_secret=client_secret,
         )
 
-        import httplib2
-        import google_auth_httplib2
-        http = httplib2.Http(timeout=300)
-        authed_http = google_auth_httplib2.AuthorizedHttp(credentials, http=http)
-
         return build(
             "youtube",
             "v3",
+            credentials=credentials,
             cache_discovery=False,
-            http=authed_http
         )
 
     def upload_video(
