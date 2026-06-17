@@ -185,20 +185,13 @@ async def execute_download_phase(
         if task_id in cancelled_tasks:
             raise TaskCancelledError("Task was cancelled before starting.")
 
-        await _broadcast("progress", "Generating Stealth Session via Camoufox...", video_url=video_url, percent=0.0, stage="download")
+        await _broadcast("progress", "Initializing Download Engine...", video_url=video_url, percent=0.0, stage="download")
         
+        # We skip Camoufox because the generic PoToken + WARP IP is sufficient
+        # and avoids the 45-second headless browser timeout.
         visitor_data = ""
         visitor_cookie = ""
         
-        try:
-            session_data = await generate_session()
-            visitor_data = session_data.visitor_data
-            visitor_cookie = session_data.visitor_cookie
-            await _broadcast("info", "Camoufox session generated successfully.", video_url=video_url)
-        except Exception as e:
-            logger.error("Camoufox session generation failed: %s", str(e))
-            await _broadcast("info", "Camoufox failed, falling back to unauthenticated BotGuard request...", video_url=video_url)
-
         await _broadcast("info", "Initializing VideoPipelineDownloader...", video_url=video_url)
 
         engine = VideoPipelineDownloader(WORKSPACE_DIR, DOWNLOADS_DIR)
